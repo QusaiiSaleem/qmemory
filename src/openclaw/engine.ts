@@ -133,6 +133,7 @@ export function createEngine(
   // Track the current session for this engine instance
   let currentSessionId: string | null = null;
   let currentSessionKey: string | null = null;
+  let hasShownToolsGuide = false; // Show tools list only on first assemble per session
 
   // Set the logger on the DB client so it uses OpenClaw's logger
   setLogger(logger);
@@ -205,6 +206,7 @@ export function createEngine(
       // OpenClaw sends: "agent:main:telegram:group:-1003655876469:topic:7"
       const sessionKey = params.sessionKey ?? params.sessionId;
       currentSessionKey = sessionKey;
+      hasShownToolsGuide = false; // Reset for new session
       const parsed = parseSessionKey(sessionKey);
 
       // Use parsed values, allow explicit params to override
@@ -381,8 +383,11 @@ export function createEngine(
       }
 
       // Fit to token budget and format as system prompt addition
+      // Show tools guide only on first assemble of this session
       const fitted = fitToTokenBudget(memories, memoryBudget);
-      const systemPromptAddition = formatMemories(fitted);
+      const isFirstAssemble = !hasShownToolsGuide;
+      const systemPromptAddition = formatMemories(fitted, isFirstAssemble);
+      if (isFirstAssemble) hasShownToolsGuide = true;
 
       // Estimate tokens for the current messages
       const messagesText = messages

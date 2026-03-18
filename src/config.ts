@@ -284,31 +284,44 @@ export function fitToTokenBudget(
 }
 
 /** Format recalled memories as markdown for system prompt injection */
-export function formatMemories(memories: RecalledMemory[]): string {
-  if (memories.length === 0) return "";
+/**
+ * Format memories for system prompt injection.
+ * @param includeToolsGuide - true on first message of session, false after
+ */
+export function formatMemories(
+  memories: RecalledMemory[],
+  includeToolsGuide = false,
+): string {
+  if (memories.length === 0 && !includeToolsGuide) return "";
 
   const lines = memories.map((m) => {
     const parts = [`[${m.category}`];
-    if (m.salience >= 0.8) parts.push("!");        // critical marker
+    if (m.salience >= 0.8) parts.push("!");
     parts.push(`] ${m.content}`);
     if (m.valid_until) parts.push(` (expires: ${m.valid_until})`);
     return `- ${parts.join("")}`;
   });
 
-  return [
+  const sections = [
     "## Cross-Session Memory (Qmemory)",
     `_${memories.length} memories recalled, sorted by importance_`,
     "",
     ...lines,
-    "",
-    "### Memory Tools",
-    "- `qmemory_save` — Save important facts, decisions, corrections (auto-dedup)",
-    "- `qmemory_search` — Search all memories by meaning, category, or scope",
-    "- `qmemory_link` — Create relationships between any two things (any type)",
-    "- `qmemory_correct` — Fix, update salience/scope, delete, or unlink",
-    "- `qmemory_person` — Create/find people with linked contacts (WhatsApp, email, etc.)",
-    "- `qmemory_import` — Import a markdown file into the memory graph",
-    "",
-    "_Use these tools when user shares important info or asks you to remember/forget/connect things._",
-  ].join("\n");
+  ];
+
+  // Tools guide only on first message — saves tokens on subsequent turns
+  if (includeToolsGuide) {
+    sections.push(
+      "",
+      "### Memory Tools (available this session)",
+      "- `qmemory_save` — Save important facts, decisions, corrections (auto-dedup)",
+      "- `qmemory_search` — Deep search by meaning, category, or scope",
+      "- `qmemory_link` — Create relationships between any two things",
+      "- `qmemory_correct` — Fix, update, delete, or unlink",
+      "- `qmemory_person` — Create/find people with linked contacts",
+      "- `qmemory_import` — Import a markdown file into the graph",
+    );
+  }
+
+  return sections.join("\n");
 }
