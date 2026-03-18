@@ -55,7 +55,7 @@ export function searchMemoriesBM25(
   return {
     surql: `
       SELECT *, search::score(1) AS score FROM memory
-      WHERE content MATCHES $query
+      WHERE content @1@ $query
         AND is_active = true
         AND ($scope = "any" OR scope = $scope)
         AND salience >= $minSalience
