@@ -137,13 +137,14 @@ If no relationships found, return: []`;
 
         try {
           await query(
-            `RELATE $from -> relates -> $to CONTENT {
+            `LET $f = type::record($from); LET $t = type::record($to);
+             RELATE $f->relates->$t CONTENT {
               type: $type,
               reason: $reason,
               confidence: 0.7,
               created_by: "linker",
               created_at: time::now()
-            }`,
+            };`,
             {
               from: rel.from_id,
               to: rel.to_id,
@@ -267,13 +268,14 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
             for (const sourceId of insight.based_on ?? []) {
               if (!validIds.includes(sourceId)) continue;
               await query(
-                `RELATE $from->relates->$to CONTENT {
+                `LET $f = type::record($from); LET $t = type::record($to);
+                 RELATE $f->relates->$t CONTENT {
                   type: "synthesized_from",
                   reason: "Insight derived during reflection",
                   confidence: 0.7,
                   created_by: "reflect",
                   created_at: time::now()
-                }`,
+                };`,
                 { from: result.memory_id, to: sourceId },
               );
             }
@@ -302,13 +304,14 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
 
           // Create a `contradicts` edge from new → old
           await query(
-            `RELATE $from -> relates -> $to CONTENT {
+            `LET $f = type::record($from); LET $t = type::record($to);
+             RELATE $f->relates->$t CONTENT {
               type: "contradicts",
               reason: $reason,
               confidence: 0.8,
               created_by: "reflect",
               created_at: time::now()
-            }`,
+            };`,
             {
               from: contradiction.new_id,
               to: contradiction.old_id,

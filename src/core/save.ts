@@ -133,7 +133,7 @@ export async function saveMemory(
 
     // Also create a prev_version edge for graph traversal
     await query(
-      `RELATE $newId->prev_version->$oldId;`,
+      `LET $f = type::record($newId); LET $t = type::record($oldId); RELATE $f->prev_version->$t;`,
       { newId, oldId: decision.target_id },
     );
 

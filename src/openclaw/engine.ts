@@ -301,7 +301,7 @@ export function createEngine(
 
       // Create structural edge: session → message
       await query(
-        `RELATE $from -> has_message -> $to SET created_at = time::now()`,
+        `LET $f = type::record($from); LET $t = type::record($to); RELATE $f->has_message->$t SET created_at = time::now();`,
         { from: currentSessionId, to: messageId },
       );
 

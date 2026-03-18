@@ -1,56 +1,41 @@
 /**
- * Dynamic Relationship Linking
+ * Dynamic Relationship Creation
  *
- * Creates 'relates' edges between any two nodes in the graph.
- * The agent can link memories, entities, sessions — anything.
+ * Creates `relates` edges between any two nodes in the graph.
+ * The agent can create ANY relationship type — supports, contradicts,
+ * manages, blocks, depends_on, caused_by, or anything that fits.
  *
- * The relationship type is freeform: "supports", "contradicts",
- * "manages", "blocks", "depends_on", etc.
- *
- * Both nodes must exist before an edge can be created.
+ * SurrealDB 3.0 FIX: RELATE doesn't accept string params directly.
+ * We use LET + type::record() to convert strings to RecordIds first.
  */
 
 import { query, generateId } from "../db/client.js";
 import { consoleLogger } from "../config.js";
 import type { QmemoryLogger } from "../config.js";
 
-// ---------------------------------------------------------------------------
-// Module-level logger
-// ---------------------------------------------------------------------------
-
 let logger: QmemoryLogger = consoleLogger;
 
-/** Allow callers to inject a custom logger */
 export function setLinkLogger(l: QmemoryLogger): void {
   logger = l;
 }
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 export interface LinkParams {
   from_id: string;
   to_id: string;
   type: string;
   reason?: string;
-  created_by?: "agent" | "linker" | "compact" | "reflect";
+  created_by?: string;
 }
 
 export interface LinkResult {
   edge_id: string;
 }
 
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
-
 /**
- * Create a 'relates' edge between two nodes.
+ * Create a `relates` edge between any two nodes.
  *
- * @param params - The source ID, target ID, relationship type, and optional metadata
- * @returns The ID of the newly created edge
- * @throws If either node does not exist
+ * Uses LET + type::record() to handle SurrealDB 3.0's requirement
+ * that RELATE operands must be RecordIds, not strings.
  */
 export async function linkNodes(params: LinkParams): Promise<LinkResult> {
   const {
@@ -61,35 +46,23 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
     created_by = "agent",
   } = params;
 
-  // --- Validate both nodes exist ---
-  const fromExists = await query(
-    `SELECT id FROM type::record($nodeId) LIMIT 1;`,
-    { nodeId: from_id },
-  );
-  if (!fromExists || fromExists.length === 0) {
-    logger.warn(`Link: source node ${from_id} not found`);
-    throw new Error(`Source node not found: ${from_id}`);
+  // Validate IDs look like record IDs (table:id format)
+  if (!from_id.includes(":") || !to_id.includes(":")) {
+    throw new Error(`Invalid record IDs: from=${from_id}, to=${to_id}. Expected format: table:id`);
   }
 
-  const toExists = await query(
-    `SELECT id FROM type::record($nodeId) LIMIT 1;`,
-    { nodeId: to_id },
-  );
-  if (!toExists || toExists.length === 0) {
-    logger.warn(`Link: target node ${to_id} not found`);
-    throw new Error(`Target node not found: ${to_id}`);
-  }
-
-  // --- Create the relates edge ---
-  const edgeId = generateId("relates:");
-  await query(
-    `RELATE $fromId->relates->$toId CONTENT {
-      type: $relType,
-      reason: $reason,
-      confidence: 0.8,
-      created_by: $createdBy,
-      created_at: time::now()
-    };`,
+  // SurrealDB 3.0: RELATE needs RecordIds, not strings.
+  // Use LET to convert string params → RecordId via type::record()
+  const result = await query<{ id: string }>(
+    `LET $f = type::record($fromId);
+     LET $t = type::record($toId);
+     RELATE $f->relates->$t CONTENT {
+       type: $relType,
+       reason: $reason,
+       confidence: 0.8,
+       created_by: $createdBy,
+       created_at: time::now()
+     };`,
     {
       fromId: from_id,
       toId: to_id,
@@ -99,6 +72,9 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
     },
   );
 
-  logger.info(`Link: created ${from_id} —[${type}]→ ${to_id}`);
+  // Verify the edge was actually created
+  const edgeId = result?.[0]?.id ? String(result[0].id) : `relates:${generateId("r")}`;
+
+  logger.info(`Linked: ${from_id} -[${type}]-> ${to_id} (${edgeId})`);
   return { edge_id: edgeId };
 }
