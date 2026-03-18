@@ -413,14 +413,19 @@ export function createEngine(
       const oldMessages = messages.slice(0, totalMessages - protectedCount);
       const freshMessages = messages.slice(totalMessages - protectedCount);
 
-      // Extract memories from old messages via subagent
-      const oldText = oldMessages
-        .map((m: any) => `[${m.role}]: ${m.content ?? ""}`)
-        .join("\n");
+      // Convert old messages to Message[] format for extractMemories
+      const oldMsgArray = oldMessages.map((m: any) => ({
+        id: "",
+        session: "",
+        role: m.role ?? "user",
+        content: m.content ?? "",
+        token_count: 0,
+        created_at: new Date().toISOString(),
+      })) as import("../config.js").Message[];
 
       let extractedFacts: ExtractedFact[] = [];
       try {
-        extractedFacts = await extractMemories(oldText, subagentRunner);
+        extractedFacts = await extractMemories(oldMsgArray, subagentRunner);
       } catch (error) {
         logger.error(`Memory extraction failed: ${error}`);
         return { ok: false, compacted: false };
@@ -430,12 +435,13 @@ export function createEngine(
       let savedCount = 0;
       for (const fact of extractedFacts) {
         try {
-          await dedup(
+          await saveMemory(
             {
               content: fact.content,
               category: fact.category,
               salience: fact.salience,
               scope: fact.scope,
+              source_type: "conversation",
             },
             subagentRunner,
           );
@@ -514,19 +520,16 @@ export function createEngine(
             Math.max(0, messages.length - config.fresh_tail_count),
           );
           if (extractableMessages.length > 0) {
-            const text = extractableMessages
-              .map((m: any) => `[${m.role}]: ${m.content ?? ""}`)
-              .join("\n");
+            const msgArray = extractableMessages.map((m: any) => ({
+              id: "", session: "", role: m.role ?? "user",
+              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+            })) as import("../config.js").Message[];
             try {
-              const facts = await extractMemories(text, subagentRunner);
+              const facts = await extractMemories(msgArray, subagentRunner);
               for (const fact of facts) {
-                await dedup(
-                  {
-                    content: fact.content,
-                    category: fact.category,
-                    salience: fact.salience,
-                    scope: fact.scope,
-                  },
+                await saveMemory(
+                  { content: fact.content, category: fact.category,
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
                   subagentRunner,
                 );
               }
@@ -539,35 +542,28 @@ export function createEngine(
       }
 
       // Background: extract facts from the last few messages
-      // Only process the most recent turn (last 2-4 messages)
-      const recentMessages = messages.slice(-4);
-      const recentText = recentMessages
-        .map((m: any) => `[${m.role}]: ${m.content ?? ""}`)
-        .join("\n");
+      const recentMsgArray = messages.slice(-4).map((m: any) => ({
+        id: "", session: "", role: m.role ?? "user",
+        content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+      })) as import("../config.js").Message[];
 
-      // Skip very short messages (not worth extracting)
-      if (recentText.length < 100) return;
+      // Skip very short messages
+      const totalContent = recentMsgArray.map(m => m.content).join("").length;
+      if (totalContent < 100) return;
 
       try {
-        const facts = await extractMemories(recentText, subagentRunner);
-
+        const facts = await extractMemories(recentMsgArray, subagentRunner);
         for (const fact of facts) {
-          await dedup(
-            {
-              content: fact.content,
-              category: fact.category,
-              salience: fact.salience,
-              scope: fact.scope,
-            },
+          await saveMemory(
+            { content: fact.content, category: fact.category,
+              salience: fact.salience, scope: fact.scope, source_type: "conversation" },
             subagentRunner,
           );
         }
-
         if (facts.length > 0) {
           logger.debug(`afterTurn: extracted ${facts.length} facts`);
         }
       } catch (error) {
-        // Non-fatal — extraction failure shouldn't block the agent
         logger.warn(`afterTurn extraction failed: ${error}`);
       }
     },

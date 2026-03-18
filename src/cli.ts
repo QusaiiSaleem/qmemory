@@ -59,7 +59,7 @@ switch (command) {
     const { default: httpServer } = await import("./mcp/server.js");
     httpServer.start({
       transportType: "httpStream",
-      httpStream: { port },
+      httpStream: { endpoint: "/mcp" as `/${string}`, port },
     });
     console.log(`Qmemory MCP server running on http://localhost:${port}/mcp`);
     break;

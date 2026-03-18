@@ -55,14 +55,21 @@ const RECENT_FALLBACK_LIMIT = 15;
  * @returns Deduplicated, salience-sorted, token-budgeted memories
  */
 export async function recall(
-  sessionKey: string,
-  options: RecallOptions,
+  optionsOrSessionKey: RecallOptions | string,
+  maybeOptions?: RecallOptions,
 ): Promise<RecalledMemory[]> {
+  // Support both recall(options) and recall(sessionKey, options)
+  const options: RecallOptions = typeof optionsOrSessionKey === "string"
+    ? (maybeOptions ?? {})
+    : optionsOrSessionKey;
+  const sessionKey = typeof optionsOrSessionKey === "string"
+    ? optionsOrSessionKey
+    : undefined;
   const collected: RecalledMemory[] = [];
 
   // --- Tier 1: Graph-linked memories ---
   // Traverse 'relates' edges from entities mentioned in the current session
-  const graphMemories = await fetchGraphLinked(sessionKey);
+  const graphMemories = sessionKey ? await fetchGraphLinked(sessionKey) : [];
   collected.push(...graphMemories);
   logger.debug(`Recall tier 1 (graph): ${graphMemories.length} memories`);
 

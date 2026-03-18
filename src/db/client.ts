@@ -8,7 +8,7 @@
  * Graceful degradation: if DB is unavailable, log warnings and continue.
  */
 
-import Surreal, { ConnectionUnavailableError, SurrealError } from "surrealdb";
+import { Surreal, ConnectionUnavailableError } from "surrealdb";
 import type { QmemoryConfig, QmemoryLogger } from "../config.js";
 import { consoleLogger } from "../config.js";
 
@@ -47,7 +47,7 @@ export async function connect(config: QmemoryConfig): Promise<Surreal | null> {
     });
 
     // Listen for connection errors (auto-reconnect)
-    db.subscribe("error", (error) => {
+    db.subscribe("error", (error: unknown) => {
       logger.warn(`SurrealDB connection error: ${error}`);
     });
 

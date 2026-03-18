@@ -151,7 +151,7 @@ export default function register(api: any): void {
         const result = await saveMemory(
           {
             content: params.content as string,
-            category: params.category as string,
+            category: params.category as import("../config.js").MemoryCategory,
             salience: (params.salience as number) ?? 0.5,
             scope: (params.scope as string) ?? "global",
           },

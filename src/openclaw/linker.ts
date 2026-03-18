@@ -254,7 +254,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
           const result = await saveMemory(
             {
               content: insight.content,
-              category: insight.category || "context",
+              category: (insight.category || "context") as import("../config.js").MemoryCategory,
               salience: 0.7,
               scope: "global",
               source_type: "reflect",
@@ -263,18 +263,18 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
           );
 
           // Create `relates` edges from the insight to its source memories
-          if (result?.id) {
+          if (result?.memory_id) {
             for (const sourceId of insight.based_on ?? []) {
               if (!validIds.includes(sourceId)) continue;
               await query(
-                `RELATE $from -> relates -> $to CONTENT {
+                `RELATE type::thing($from) -> relates -> type::thing($to) CONTENT {
                   type: "synthesized_from",
                   reason: "Insight derived during reflection",
                   confidence: 0.7,
                   created_by: "reflect",
                   created_at: time::now()
                 }`,
-                { from: result.id, to: sourceId },
+                { from: result.memory_id, to: sourceId },
               );
             }
           }
