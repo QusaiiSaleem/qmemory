@@ -1050,6 +1050,86 @@ Only **3 runtime dependencies** — keeping it simple:
 
 ---
 
+## ⛓️ Relationship Chains — The Power Feature
+
+The `relates` edge connects **ANY node to ANY node**. The agent builds chains that map real-world workflows:
+
+```
+User says: "Ahmed needs the Q2 report by Thursday. Send it to his work email."
+
+Agent builds this chain:
+
+  Session (Topic 9)
+    │ has_message
+    ▼
+  Message: "Ahmed needs the Q2 report by Thursday"
+    │ extracted_from
+    ▼
+  Memory: "Ahmed needs Q2 report by Thursday"        (salience: 0.8)
+    │ relates (assigned_to)
+    ▼
+  Entity: "Ahmed"                                     (type: person)
+    │ has_identity
+    ├──▶ Contact: WhatsApp 966501234567
+    ├──▶ Contact: gmail ahmed@company.com             ← send here
+    └──▶ Contact: Smartsheet user:12345
+```
+
+### More Real-World Chains
+
+```
+Decision Chain:
+  memory:"Budget approved" → approved_by → entity:manager
+                           → communicated_via → entity:approval_email
+                           → depends_on → memory:"Board meeting March 5"
+
+Incident Chain:
+  memory:"Prod down 2 hours" → caused_by → memory:"Friday deploy broke auth"
+                              → affected → entity:railway_prod
+                              → resolved_by → entity:on_call_engineer
+
+Task Chain:
+  entity:hire_developer → depends_on → memory:"Budget approved"
+                        → blocks → memory:"Need 2 devs for Q3"
+                        → assigned_to → entity:hr_manager
+```
+
+### People with Multiple Identities
+
+```
+qmemory_person({
+  name: "Ahmed",
+  aliases: ["أحمد"],
+  contacts: [
+    { source: "whatsapp", id: "966501234567" },
+    { source: "gmail", id: "ahmed@company.com" },
+    { source: "telegram", id: "ahmed_k" },
+    { source: "smartsheet", id: "user:12345" }
+  ]
+})
+```
+
+Later: `qmemory_person({ name: "Ahmed", action: "find" })` returns the person + ALL contacts + ALL linked memories from any session.
+
+### Common Relationship Types
+
+| Type | Use For |
+|------|---------|
+| `assigned_to` | Task → Person |
+| `approved_by` | Decision → Person |
+| `caused_by` | Incident → Root cause |
+| `depends_on` | Task → Prerequisite |
+| `blocks` | Blocker → Blocked item |
+| `has_identity` | Person → Contact (auto) |
+| `communicated_via` | Fact → Communication channel |
+| `managed_by` | Project → Manager |
+| `monitors` | Session → System |
+| `solved_using` | Problem → Tool/Skill |
+
+These are NOT fixed — use **any word** that describes the relationship.
+
+---
+
 ## 📚 Wiki / Reference Files
 
 | File | What It Is | When to Read |

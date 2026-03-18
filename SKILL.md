@@ -135,17 +135,163 @@ Listen for these signals:
 - "Those two aren't related" → `action: "unlink"`
 - "Make that more important" / "That's critical" → `action: "update", salience: 1.0`
 
+## People & Contact Graph
+
+Use `qmemory_person` to create people with multiple linked identities:
+
+```
+qmemory_person({
+  name: "Ahmed",
+  aliases: ["أحمد"],
+  contacts: [
+    { source: "whatsapp", id: "966501234567" },
+    { source: "gmail", id: "ahmed@company.com" },
+    { source: "smartsheet", id: "user:12345" }
+  ]
+})
+```
+
+Find everything about a person (all contacts + all linked memories):
+```
+qmemory_person({ name: "Ahmed", action: "find" })
+```
+
+## Relationship Chains — The Power Feature
+
+You can chain relationships to build **workflow maps**. Any node connects to any node.
+
+**Example: A conversation creates a task, assigned to a person, sent via email**
+
+```
+Step 1: User says "Ahmed needs the Q2 report by Thursday"
+
+Step 2: You build the chain:
+
+  qmemory_save({
+    content: "Ahmed needs Q2 report by Thursday",
+    category: "context", salience: 0.8
+  })
+
+  qmemory_person({
+    name: "Ahmed",
+    contacts: [{ source: "gmail", id: "ahmed@company.com" }]
+  })
+
+  qmemory_link({
+    from_id: "memory:q2report",
+    to_id: "entity:ahmed",
+    type: "assigned_to",
+    reason: "Ahmed is responsible for receiving the Q2 report"
+  })
+
+Step 3: The graph now shows:
+
+  Session (Topic 9)
+    │ has_message
+    ▼
+  Message: "Ahmed needs the Q2 report by Thursday"
+    │ extracted_from
+    ▼
+  Memory: "Ahmed needs Q2 report by Thursday" (salience: 0.8)
+    │ relates (assigned_to)
+    ▼
+  Entity: "Ahmed" (person)
+    │ has_identity
+    ├──▶ Contact: whatsapp 966501234567
+    └──▶ Contact: gmail ahmed@company.com
+```
+
+**Later, when you search for "Ahmed" in ANY topic, you find:**
+- The memory (Q2 report deadline)
+- His contacts (how to reach him)
+- The session where this was discussed
+- Any other memories linked to him
+
+### More Chain Examples
+
+**Decision → Approval → Person → Email:**
+```
+memory:"Budget approved at 500K"
+  → relates (approved_by) → entity:manager
+  → relates (communicated_via) → entity:approval_email (type: email)
+```
+
+**Incident → Cause → System → Deployment:**
+```
+memory:"Production down for 2 hours"
+  → relates (caused_by) → memory:"Friday deploy broke auth"
+  → relates (affected) → entity:railway_prod (type: system)
+```
+
+**Task → Depends On → Decision → Blocks → Hiring:**
+```
+entity:hire_developer (type: task)
+  → relates (depends_on) → memory:"Budget approved"
+  → relates (blocks) → memory:"Need 2 more developers for Q3"
+```
+
+**Meeting → Person → Project → Deadline:**
+```
+entity:kickoff_meeting (type: event, external_source: calendar)
+  → relates (attended_by) → entity:ahmed
+  → relates (about) → entity:project_x
+  → relates (has_deadline) → memory:"Project X due June 1"
+```
+
+### Relationship Types You Can Use
+
+These are NOT fixed — use ANY word that fits. Common ones:
+
+| Type | When to Use |
+|------|------------|
+| `assigned_to` | Task belongs to person |
+| `approved_by` | Decision approved by someone |
+| `caused_by` | Incident caused by action |
+| `depends_on` | X requires Y first |
+| `blocks` | X prevents Y |
+| `has_identity` | Person's contact info (auto-created by qmemory_person) |
+| `communicated_via` | Sent/discussed through channel |
+| `attended_by` | Meeting/event attendee |
+| `managed_by` | Project/team management |
+| `reports_to` | Org hierarchy |
+| `monitors` | Session/system watches something |
+| `follows` | Chronological sequence |
+| `contradicts` | New fact conflicts with old |
+| `supports` | Evidence supports decision |
+| `references` | Links to external document |
+| `solved_using` | Problem solved with tool/skill |
+
 ## External References
 
 When conversation mentions external things, the extraction process creates entities:
-- **Emails**: type `email`, external_source `hey`
+- **Emails**: type `email`, external_source `hey` or `gmail`
 - **Tasks**: type `task`, external_source `apple-reminders`
 - **Events**: type `event`, external_source `calendar`
 - **Sheets**: type `smartsheet`, external_source `smartsheet`
 - **Deployments**: type `deployment`, external_source `railway`
+- **People**: type `person` with linked contacts via `qmemory_person`
 
 You don't need to create these manually — they're extracted automatically after each turn.
-But you CAN link memories to them: `qmemory_link({ from: "memory:xxx", to: "entity:email_xxx", type: "referenced_in" })`
+But you CAN link memories to them: `qmemory_link({ from: "memory:xxx", to: "entity:xxx", type: "referenced_in" })`
+
+## Migration — Import Old Memories
+
+Import existing memory files into the graph:
+
+```
+// Import a single file
+qmemory_import({ file_path: "~/.openclaw/workspace/MEMORY.md" })
+
+// Import daily memory files
+qmemory_import({ file_path: "~/.openclaw/workspace/memory/2026-03-14.md" })
+```
+
+The import process:
+1. Reads the file
+2. Extracts facts using AI (or simple line-by-line without AI)
+3. Saves each fact with dedup (won't duplicate existing memories)
+4. Creates chronological links between files
+5. Returns: X facts extracted, Y new memories created
 
 ## What Happens in the Background
 
