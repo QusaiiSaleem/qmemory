@@ -300,5 +300,15 @@ export function formatMemories(memories: RecalledMemory[]): string {
     `_${memories.length} memories recalled, sorted by importance_`,
     "",
     ...lines,
+    "",
+    "### Memory Tools",
+    "- `qmemory_save` — Save important facts, decisions, corrections (auto-dedup)",
+    "- `qmemory_search` — Search all memories by meaning, category, or scope",
+    "- `qmemory_link` — Create relationships between any two things (any type)",
+    "- `qmemory_correct` — Fix, update salience/scope, delete, or unlink",
+    "- `qmemory_person` — Create/find people with linked contacts (WhatsApp, email, etc.)",
+    "- `qmemory_import` — Import a markdown file into the memory graph",
+    "",
+    "_Use these tools when user shares important info or asks you to remember/forget/connect things._",
   ].join("\n");
 }
