@@ -4,8 +4,10 @@
  * Single connection instance shared across all Qmemory modules.
  * Uses the official SurrealDB JS SDK (WebSocket transport).
  *
- * Pattern: connect once at bootstrap, reuse everywhere.
- * Graceful degradation: if DB is unavailable, log warnings and continue.
+ * KEY FIX: Auto-reconnect on connection loss.
+ * During long operations (migration: 1000+ queries), the WebSocket
+ * can drop. The query() function now detects this and reconnects
+ * before retrying — instead of silently failing.
  */
 
 import { Surreal, ConnectionUnavailableError } from "surrealdb";
@@ -15,6 +17,7 @@ import { consoleLogger } from "../config.js";
 let db: Surreal | null = null;
 let logger: QmemoryLogger = consoleLogger;
 let currentConfig: QmemoryConfig | null = null;
+let reconnecting = false;
 
 /** Set the logger (called by OpenClaw plugin or standalone) */
 export function setLogger(l: QmemoryLogger): void {
@@ -33,11 +36,15 @@ export function getDb(): Surreal | null {
 export async function connect(config: QmemoryConfig): Promise<Surreal | null> {
   if (db) return db;
   currentConfig = config;
+  return await createConnection(config);
+}
 
+/** Internal: create a fresh connection */
+async function createConnection(config: QmemoryConfig): Promise<Surreal | null> {
   try {
-    db = new Surreal();
+    const newDb = new Surreal();
 
-    await db.connect(config.surrealdb_url, {
+    await newDb.connect(config.surrealdb_url, {
       namespace: config.namespace,
       database: config.database,
       authentication: {
@@ -46,15 +53,14 @@ export async function connect(config: QmemoryConfig): Promise<Surreal | null> {
       },
     });
 
-    // Listen for connection errors (auto-reconnect)
-    db.subscribe("error", (error: unknown) => {
+    newDb.subscribe("error", (error: unknown) => {
       logger.warn(`SurrealDB connection error: ${error}`);
     });
 
+    db = newDb;
     logger.info(
       `Connected to SurrealDB at ${config.surrealdb_url} (${config.namespace}/${config.database})`,
     );
-
     return db;
   } catch (error) {
     logger.error(`Failed to connect to SurrealDB: ${error}`);
@@ -63,14 +69,33 @@ export async function connect(config: QmemoryConfig): Promise<Surreal | null> {
   }
 }
 
+/**
+ * Reconnect to SurrealDB after connection loss.
+ * Prevents multiple simultaneous reconnection attempts.
+ */
+async function reconnect(): Promise<boolean> {
+  if (reconnecting || !currentConfig) return false;
+  reconnecting = true;
+
+  try {
+    // Close stale connection
+    if (db) {
+      try { await db.close(); } catch { /* ignore */ }
+      db = null;
+    }
+
+    logger.info("Reconnecting to SurrealDB...");
+    const result = await createConnection(currentConfig);
+    return result !== null;
+  } finally {
+    reconnecting = false;
+  }
+}
+
 /** Disconnect from SurrealDB */
 export async function disconnect(): Promise<void> {
   if (db) {
-    try {
-      await db.close();
-    } catch {
-      // Ignore close errors
-    }
+    try { await db.close(); } catch { /* ignore */ }
     db = null;
     logger.info("Disconnected from SurrealDB");
   }
@@ -88,16 +113,25 @@ export async function isHealthy(): Promise<boolean> {
 }
 
 /**
- * Execute a SurrealQL query with graceful degradation.
- * Returns null if DB is unavailable (instead of throwing).
+ * Execute a SurrealQL query with auto-reconnect.
+ *
+ * If the connection drops mid-query:
+ * 1. Reconnect automatically
+ * 2. Retry the query once
+ * 3. If still failing, return null (graceful degradation)
  */
 export async function query<T = unknown>(
   surql: string,
   params?: Record<string, unknown>,
 ): Promise<T[] | null> {
+  // Try to reconnect if disconnected
   if (!db) {
-    logger.warn("SurrealDB not connected — skipping query");
-    return null;
+    if (currentConfig) {
+      const ok = await reconnect();
+      if (!ok) return null;
+    } else {
+      return null;
+    }
   }
 
   try {
@@ -105,14 +139,27 @@ export async function query<T = unknown>(
       logger.debug(`SurrealQL: ${surql.slice(0, 200)}`, params);
     }
 
-    const results = await db.query<[T[]]>(surql, params);
+    const results = await db!.query<[T[]]>(surql, params);
     return results[0] ?? [];
   } catch (error) {
-    if (error instanceof ConnectionUnavailableError) {
-      logger.warn("SurrealDB connection lost — skipping query");
+    // Connection lost — try reconnect + retry ONCE
+    if (error instanceof ConnectionUnavailableError || isConnectionError(error)) {
+      logger.warn("SurrealDB connection lost — attempting reconnect...");
       db = null;
-      return null;
+      const ok = await reconnect();
+      if (!ok) return null;
+
+      // Retry the query
+      try {
+        const results = await db!.query<[T[]]>(surql, params);
+        return results[0] ?? [];
+      } catch (retryError) {
+        logger.error(`Query failed after reconnect: ${retryError}`);
+        db = null;
+        return null;
+      }
     }
+
     logger.error(`SurrealQL error: ${error}`);
     return null;
   }
@@ -120,22 +167,41 @@ export async function query<T = unknown>(
 
 /**
  * Execute multiple statements as one query.
- * Returns array of results (one per statement).
+ * Same auto-reconnect behavior as query().
  */
 export async function queryMulti<T extends unknown[]>(
   surql: string,
   params?: Record<string, unknown>,
 ): Promise<T | null> {
-  if (!db) return null;
+  if (!db) {
+    if (currentConfig) {
+      const ok = await reconnect();
+      if (!ok) return null;
+    } else {
+      return null;
+    }
+  }
 
   try {
     if (currentConfig?.debug) {
       logger.debug(`SurrealQL (multi): ${surql.slice(0, 200)}`, params);
     }
-
-    const results = await db.query(surql, params);
+    const results = await db!.query(surql, params);
     return results as T;
   } catch (error) {
+    if (error instanceof ConnectionUnavailableError || isConnectionError(error)) {
+      logger.warn("SurrealDB connection lost (multi) — attempting reconnect...");
+      db = null;
+      const ok = await reconnect();
+      if (!ok) return null;
+      try {
+        const results = await db!.query(surql, params);
+        return results as T;
+      } catch {
+        db = null;
+        return null;
+      }
+    }
     logger.error(`SurrealQL multi error: ${error}`);
     return null;
   }
@@ -143,11 +209,10 @@ export async function queryMulti<T extends unknown[]>(
 
 /**
  * Apply the schema from qmemory.surql.
- * Called during bootstrap — safe to run multiple times (IF NOT EXISTS).
+ * Called during bootstrap — safe to run multiple times.
  */
 export async function applySchema(schemaSurql: string): Promise<boolean> {
   if (!db) return false;
-
   try {
     await db.query(schemaSurql);
     logger.info("Schema applied successfully");
@@ -161,4 +226,16 @@ export async function applySchema(schemaSurql: string): Promise<boolean> {
 /** Generate a timestamp-based ID (no dashes — SurrealDB safe) */
 export function generateId(prefix: string): string {
   return `${prefix}${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Check if an error is connection-related (covers various error types) */
+function isConnectionError(error: unknown): boolean {
+  if (error instanceof ConnectionUnavailableError) return true;
+  const msg = String(error).toLowerCase();
+  return msg.includes("connection") ||
+    msg.includes("socket") ||
+    msg.includes("econnrefused") ||
+    msg.includes("econnreset") ||
+    msg.includes("not connected") ||
+    msg.includes("closed");
 }
