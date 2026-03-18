@@ -138,7 +138,157 @@ export async function migrateWorkspaceMemories(
     `${result.memories_created} memories, ${result.relationships_created} relationships`,
   );
 
+  // Post-migration: bulk relink all orphan memories
+  if (subagentRunner && result.memories_created > 0) {
+    logger.info("Starting post-migration bulk relink...");
+    const relinkResult = await relinkOrphans(subagentRunner);
+    result.relationships_created += relinkResult;
+    logger.info(`Bulk relink complete: ${relinkResult} new relationships`);
+  }
+
   return result;
+}
+
+/**
+ * Bulk relink all orphan memories (memories with 0 relationships).
+ *
+ * Strategy: group orphans by category, then compare each group
+ * against top entities and high-salience memories. The subagent
+ * finds connections between them.
+ *
+ * Processes in batches of 15 to avoid overwhelming the LLM.
+ */
+export async function relinkOrphans(
+  subagentRunner: SubagentRunner,
+  maxBatches = 20,
+): Promise<number> {
+  let totalCreated = 0;
+
+  // Get all orphan memories (no outgoing or incoming relates edges)
+  const orphans = await query<{ id: string; content: string; category: string; salience: number }>(
+    `SELECT id, content, category, salience FROM memory
+     WHERE is_active = true
+       AND count(->relates) = 0
+       AND count(<-relates) = 0
+     ORDER BY salience DESC
+     LIMIT 300;`,
+  );
+
+  if (!orphans || orphans.length === 0) {
+    logger.info("Relink: no orphan memories found");
+    return 0;
+  }
+
+  logger.info(`Relink: found ${orphans.length} orphan memories`);
+
+  // Get existing entities + high-salience memories as "anchors" to link to
+  const anchors = await query<{ id: string; content: string; type: string }>(
+    `SELECT id, content, "memory" AS type FROM memory
+     WHERE is_active = true AND salience >= 0.7
+       AND (count(->relates) > 0 OR count(<-relates) > 0)
+     ORDER BY salience DESC LIMIT 20;`,
+  );
+
+  const entities = await query<{ id: string; name: string; type: string }>(
+    `SELECT id, name, type FROM entity LIMIT 20;`,
+  );
+
+  // Build anchor context for the LLM
+  const anchorList = [
+    ...(anchors ?? []).map((a) => `[${a.id}] (memory) ${a.content}`),
+    ...(entities ?? []).map((e) => `[${e.id}] (${e.type}) ${e.name}`),
+  ].join("\n");
+
+  if (!anchorList) {
+    logger.info("Relink: no anchors to link to — skipping");
+    return 0;
+  }
+
+  // Process orphans in batches
+  const batchSize = 15;
+  const batches = Math.min(
+    Math.ceil(orphans.length / batchSize),
+    maxBatches,
+  );
+
+  for (let i = 0; i < batches; i++) {
+    const batch = orphans.slice(i * batchSize, (i + 1) * batchSize);
+    if (batch.length === 0) break;
+
+    logger.info(`Relink batch ${i + 1}/${batches}: ${batch.length} orphans`);
+
+    const orphanList = batch
+      .map((m) => `[${m.id}] (${m.category}) ${m.content}`)
+      .join("\n");
+
+    const prompt = `You are linking orphan memories to existing entities and memories.
+
+ORPHAN MEMORIES (need relationships):
+${orphanList}
+
+EXISTING ANCHORS (link to these):
+${anchorList}
+
+Find relationships between orphan memories and anchors.
+Also find relationships BETWEEN orphan memories if they're related.
+
+Return JSON array:
+[
+  {
+    "from_id": "memory:xxx",
+    "to_id": "memory:yyy or entity:zzz",
+    "type": "about|supports|contradicts|elaborates|depends_on|part_of|related_to",
+    "reason": "Brief explanation"
+  }
+]
+
+Rules:
+- Only create justified relationships (don't force connections)
+- A memory about a person → link to that person's entity
+- A memory about a project → link to that project's entity
+- Related facts → link with "supports" or "elaborates"
+- Contradicting facts → link with "contradicts"
+- If no relationships found for an orphan, skip it
+
+Return JSON only:`;
+
+    try {
+      const response = await subagentRunner(prompt);
+      const cleaned = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) continue;
+
+      const relationships = JSON.parse(jsonMatch[0]) as Array<{
+        from_id: string;
+        to_id: string;
+        type: string;
+        reason?: string;
+      }>;
+
+      // Create edges
+      for (const rel of relationships) {
+        if (!rel.from_id || !rel.to_id || !rel.type) continue;
+        try {
+          await linkNodes({
+            from_id: rel.from_id,
+            to_id: rel.to_id,
+            type: rel.type,
+            reason: rel.reason,
+            created_by: "compact",
+          });
+          totalCreated++;
+        } catch {
+          // Skip invalid links silently
+        }
+      }
+
+      logger.info(`Relink batch ${i + 1}: created ${relationships.length} relationships`);
+    } catch (error) {
+      logger.warn(`Relink batch ${i + 1} failed: ${error}`);
+    }
+  }
+
+  return totalCreated;
 }
 
 /**

@@ -382,55 +382,52 @@ export function createEngine(
         logger.warn(`Recall failed (non-fatal): ${error}`);
       }
 
-      // Fit to token budget and format as system prompt addition
+      // Fit to token budget: 60% memories, 40% graph map
       const isFirstAssemble = !hasShownToolsGuide;
-
-      // Split budget: 60% for memories, 40% for graph map (on first assemble)
-      const memBudget = isFirstAssemble
-        ? Math.floor(memoryBudget * 0.6)
-        : memoryBudget;
+      const memBudget = Math.floor(memoryBudget * 0.6);
       const fitted = fitToTokenBudget(memories, memBudget);
 
-      // Build injection parts
+      // Build injection — THREE parts on EVERY message:
+      // 1. Categorized memories (contextual to conversation)
+      // 2. Knowledge graph map (entities + relationships)
+      // 3. Tools list (first message only)
       const parts: string[] = [];
 
       // Part 1: Categorized memories
       const memoriesText = formatMemories(fitted, isFirstAssemble);
       if (memoriesText) parts.push(memoriesText);
 
-      // Part 2: Graph map (first assemble only — shows entity relationships)
-      if (isFirstAssemble) {
-        try {
-          const { getGraphSummary } = await import("../db/queries.js");
-          const { queryMulti } = await import("../db/client.js");
-          const graphQ = getGraphSummary();
-          const graphResults = await queryMulti<[
-            import("../config.js").GraphEntity[],
-            import("../config.js").GraphEdge[],
-            Array<{ count: number }>,
-            Array<{ memories: number; entities: number; edges: number; sessions: number }>,
-          ]>(graphQ.surql, graphQ.params);
+      // Part 2: Knowledge graph map — ALWAYS shown (this is the core product)
+      try {
+        const { getGraphSummary } = await import("../db/queries.js");
+        const { queryMulti } = await import("../db/client.js");
+        const graphQ = getGraphSummary();
+        const graphResults = await queryMulti<[
+          import("../config.js").GraphEntity[],
+          import("../config.js").GraphEdge[],
+          Array<{ count: number }>,
+          Array<{ memories: number; entities: number; edges: number; sessions: number }>,
+        ]>(graphQ.surql, graphQ.params);
 
-          if (graphResults) {
-            const [entities, edges, orphanResult, statsResult] = graphResults;
-            const stats: import("../config.js").GraphStats = {
-              memories: statsResult?.[0]?.memories ?? 0,
-              entities: statsResult?.[0]?.entities ?? 0,
-              edges: statsResult?.[0]?.edges ?? 0,
-              sessions: statsResult?.[0]?.sessions ?? 0,
-              orphans: orphanResult?.[0]?.count ?? 0,
-            };
-            const { formatGraphMap } = await import("../config.js");
-            const graphMap = formatGraphMap(
-              (entities ?? []) as import("../config.js").GraphEntity[],
-              (edges ?? []) as import("../config.js").GraphEdge[],
-              stats,
-            );
-            if (graphMap) parts.push(graphMap);
-          }
-        } catch (graphError) {
-          logger.debug(`Graph map failed (non-fatal): ${graphError}`);
+        if (graphResults) {
+          const [entities, edges, orphanResult, statsResult] = graphResults;
+          const stats: import("../config.js").GraphStats = {
+            memories: statsResult?.[0]?.memories ?? 0,
+            entities: statsResult?.[0]?.entities ?? 0,
+            edges: statsResult?.[0]?.edges ?? 0,
+            sessions: statsResult?.[0]?.sessions ?? 0,
+            orphans: orphanResult?.[0]?.count ?? 0,
+          };
+          const { formatGraphMap } = await import("../config.js");
+          const graphMap = formatGraphMap(
+            (entities ?? []) as import("../config.js").GraphEntity[],
+            (edges ?? []) as import("../config.js").GraphEdge[],
+            stats,
+          );
+          if (graphMap) parts.push(graphMap);
         }
+      } catch (graphError) {
+        logger.debug(`Graph map failed (non-fatal): ${graphError}`);
       }
 
       if (isFirstAssemble) hasShownToolsGuide = true;
