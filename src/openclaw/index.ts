@@ -41,6 +41,7 @@ function createSubagentRunner(api: any): SubagentRunner {
       const { runId } = await api.runtime.subagent.run({
         sessionKey,
         message: task,
+        idempotencyKey: `qmem-${Date.now()}-${subagentCounter}`,
         lane: "subagent",
       });
 

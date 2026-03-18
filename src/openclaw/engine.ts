@@ -244,26 +244,35 @@ export function createEngine(
       } else {
         const sessionIdPart = generateId("s");
         currentSessionId = `session:${sessionIdPart}`;
+        // Build params — omit null optional fields (SurrealDB 3.0 rejects NULL for option<string>)
+        const sessionParams: Record<string, unknown> = {
+          idPart: sessionIdPart,
+          key: sessionKey,
+          channel,
+          chatType,
+          scope,
+        };
+        // Only include optional fields when they have values
+        const optionalFields: string[] = [];
+        if (topicId) {
+          sessionParams.topicId = topicId;
+          optionalFields.push("topic_id: $topicId,");
+        }
+        if (groupId) {
+          sessionParams.groupId = groupId;
+          optionalFields.push("group_id: $groupId,");
+        }
         await query(
           `CREATE type::record("session", $idPart) CONTENT {
             session_key: $key,
             channel: $channel,
             chat_type: $chatType,
-            topic_id: $topicId,
-            group_id: $groupId,
+            ${optionalFields.join("\n            ")}
             scope: $scope,
             last_active: time::now(),
             created_at: time::now()
           }`,
-          {
-            idPart: sessionIdPart,
-            key: sessionKey,
-            channel,
-            chatType,
-            topicId: topicId || undefined,
-            groupId: groupId || undefined,
-            scope,
-          },
+          sessionParams,
         );
         logger.info(`Created session: ${currentSessionId} (${channel}/${chatType}, topic:${topicId})`);
       }
