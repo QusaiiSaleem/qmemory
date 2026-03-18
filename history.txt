@@ -1,0 +1,13 @@
+#V2
+-- Stats
+SELECT count() AS count FROM memory WHERE is_active = true GROUP ALL;
+SELECT count() AS count FROM entity GROUP ALL;
+SELECT count() AS count FROM relates GROUP ALL;
+SELECT count() AS count FROM session GROUP ALL;
+-- Sample memories (top 15 by salience)
+SELECT id, content, category, salience, scope, source_type FROM memory
+-- Category breakdown
+SELECT category, count() AS count FROM memory WHERE is_active = true GROUP BY category ORDER BY count DESC;
+-- The 1 relationship that exists
+SELECT * FROM relates;
+-- Check for duplicates (same content appearing multiple times)

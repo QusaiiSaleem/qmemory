@@ -181,7 +181,7 @@ export function createEngine(
         const memCount = await query<{ count: number }>(
           "SELECT count() AS count FROM memory GROUP ALL;"
         );
-        if (memCount && memCount.length > 0 && memCount[0].count === 0) {
+        if (memCount && memCount.length > 0 && memCount[0].count === 0 && subagentRunner) {
           logger.info("First run detected (0 memories) — auto-importing workspace memory files...");
           try {
             const { migrateWorkspaceMemories, setMigrateLogger } = await import("../core/migrate.js");
@@ -189,7 +189,7 @@ export function createEngine(
             // Detect workspace path from OpenClaw config or default
             const workspacePath = (openclawConfig as any)?.workspace?.path
               ?? join(process.env.HOME ?? "", ".openclaw", "workspace");
-            const result = await migrateWorkspaceMemories(workspacePath, subagentRunner);
+            const result = await migrateWorkspaceMemories(workspacePath, subagentRunner!);
             logger.info(
               `Auto-import complete: ${result.files_read} files, ${result.memories_created} memories, ${result.relationships_created} relationships`
             );

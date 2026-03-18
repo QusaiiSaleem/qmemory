@@ -48,7 +48,7 @@ export interface MigrateResult {
  */
 export async function migrateWorkspaceMemories(
   workspacePath: string,
-  subagentRunner?: SubagentRunner,
+  subagentRunner: SubagentRunner,
 ): Promise<MigrateResult> {
   const result: MigrateResult = {
     files_read: 0,
@@ -74,10 +74,8 @@ export async function migrateWorkspaceMemories(
       if (!content.trim()) continue;
       result.files_read++;
 
-      // Extract facts from file content
-      const facts = subagentRunner
-        ? await smartExtract(content, file.name, subagentRunner)
-        : simpleExtract(content, file.name);
+      // Extract facts using LLM (required — no simple fallback)
+      const facts = await smartExtract(content, file.name, subagentRunner);
 
       result.facts_extracted += facts.length;
 
@@ -297,14 +295,12 @@ Return JSON only:`;
  */
 export async function importFile(
   filePath: string,
-  subagentRunner?: SubagentRunner,
+  subagentRunner: SubagentRunner,
 ): Promise<{ facts_extracted: number; memories_created: number }> {
   const content = await readFile(filePath, "utf-8");
   const fileName = basename(filePath);
 
-  const facts = subagentRunner
-    ? await smartExtract(content, fileName, subagentRunner)
-    : simpleExtract(content, fileName);
+  const facts = await smartExtract(content, fileName, subagentRunner);
 
   let memoriesCreated = 0;
   for (const fact of facts) {
@@ -395,51 +391,15 @@ ${content.slice(0, 6000)}
 Return JSON only:
 [{"content": "...", "category": "...", "salience": 0.5, "scope": "global", "entities": ["..."]}]`;
 
-  try {
-    const response = await subagentRunner(prompt);
-    // Parse JSON from response (handle markdown code fences)
-    const cleaned = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return simpleExtract(content, fileName);
-    return JSON.parse(jsonMatch[0]) as ExtractedFact[];
-  } catch (error) {
-    logger.warn(`Smart extraction failed for ${fileName}, falling back to simple: ${error}`);
-    return simpleExtract(content, fileName);
+  const response = await subagentRunner(prompt);
+  // Parse JSON from response (handle markdown code fences)
+  const cleaned = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    logger.warn(`LLM returned no JSON for ${fileName} — skipping file`);
+    return [];
   }
-}
-
-/** Simple extraction — each non-empty line becomes a memory */
-function simpleExtract(content: string, fileName: string): ExtractedFact[] {
-  const facts: ExtractedFact[] = [];
-
-  const lines = content.split("\n");
-  for (const line of lines) {
-    const trimmed = line.replace(/^[-*#>\s]+/, "").trim();
-    // Skip empty lines, headers, and very short lines
-    if (!trimmed || trimmed.length < 10) continue;
-    // Skip markdown formatting lines
-    if (trimmed.startsWith("---") || trimmed.startsWith("```")) continue;
-
-    facts.push({
-      content: trimmed,
-      category: guessCategory(trimmed),
-      salience: 0.5,
-      scope: "global",
-    });
-  }
-
-  return facts;
-}
-
-/** Simple heuristic to guess category from content */
-function guessCategory(text: string): ExtractedFact["category"] {
-  const lower = text.toLowerCase();
-  if (lower.includes("prefer") || lower.includes("يفضل")) return "preference";
-  if (lower.includes("decided") || lower.includes("chose") || lower.includes("قرر")) return "decision";
-  if (lower.includes("plan") || lower.includes("will") || lower.includes("خطة")) return "idea";
-  if (lower.includes("actually") || lower.includes("correct") || lower.includes("في الحقيقة")) return "feedback";
-  if (lower.includes("style") || lower.includes("أسلوب")) return "style";
-  return "context";
+  return JSON.parse(jsonMatch[0]) as ExtractedFact[];
 }
 
 // ---------------------------------------------------------------------------
