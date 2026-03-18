@@ -302,14 +302,57 @@ export function createEngine(
       // Calculate memory budget (max 15% of total context window)
       const memoryBudget = Math.floor(totalTokens * config.memory_budget_pct);
 
-      // Recall cross-session memories using 4-tier pipeline
+      // --- CONTEXTUAL RECALL ---
+      // Extract what the conversation is about from recent messages
+      // so we recall RELEVANT memories, not just top-salience ones
+      const recentMessages = messages.slice(-6); // Last 3 turns (user + assistant)
+      const conversationContext = recentMessages
+        .map((m: any) => m?.content ?? "")
+        .filter((c: string) => c.length > 0)
+        .join(" ")
+        .slice(0, 500); // Cap to avoid huge queries
+
+      // Parse session key for scope-aware recall
+      const sessionScope = currentSessionKey
+        ? parseSessionKey(currentSessionKey).scope
+        : "global";
+
       let memories: RecalledMemory[] = [];
       try {
-        memories = await recall({
-          scope: currentSessionKey ? undefined : "global",
-          min_salience: config.min_salience_recall,
-          limit: 30,
-          token_budget: memoryBudget,
+        // Tier 1+2: Context-aware search (graph + BM25 using conversation context)
+        if (conversationContext.length > 20) {
+          const contextual = await recall({
+            query: conversationContext,
+            scope: sessionScope !== "global" ? sessionScope : undefined,
+            min_salience: config.min_salience_recall,
+            limit: 20,
+            token_budget: Math.floor(memoryBudget * 0.7), // 70% for contextual
+          });
+          memories.push(...contextual);
+        }
+
+        // Always include high-salience memories (critical rules, preferences)
+        // These are recalled regardless of what the conversation is about
+        const critical = await recall({
+          min_salience: 0.8,
+          limit: 10,
+          token_budget: Math.floor(memoryBudget * 0.3), // 30% for critical
+        });
+
+        // Merge and deduplicate by ID
+        const seen = new Set(memories.map(m => m.id));
+        for (const m of critical) {
+          if (!seen.has(m.id)) {
+            memories.push(m);
+            seen.add(m.id);
+          }
+        }
+
+        // Sort: critical first (salience DESC), then by relevance score
+        memories.sort((a, b) => {
+          if (a.salience >= 0.8 && b.salience < 0.8) return -1;
+          if (b.salience >= 0.8 && a.salience < 0.8) return 1;
+          return (b.score ?? b.salience) - (a.score ?? a.salience);
         });
       } catch (error) {
         logger.warn(`Recall failed (non-fatal): ${error}`);
@@ -325,10 +368,12 @@ export function createEngine(
         .join(" ");
       const estimatedTokens = estimateTokens(messagesText);
 
-      logger.debug(
-        `Assembled: ${messages.length} messages + ${fitted.length} memories ` +
-        `(${estimateTokens(systemPromptAddition)} memory tokens)`,
-      );
+      if (fitted.length > 0) {
+        logger.debug(
+          `Assembled: ${messages.length} msgs + ${fitted.length} memories ` +
+          `(${estimateTokens(systemPromptAddition)} tokens, context: "${conversationContext.slice(0, 50)}...")`,
+        );
+      }
 
       return {
         messages,
