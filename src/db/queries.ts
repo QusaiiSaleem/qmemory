@@ -54,13 +54,13 @@ export function searchMemoriesBM25(
 ): PreparedQuery {
   return {
     surql: `
-      SELECT *, search::score(1) AS bm25_score FROM memory
-      WHERE content @1@ $query
+      SELECT * FROM memory
+      WHERE content @@ $query
         AND is_active = true
         AND ($scope = "any" OR scope = $scope)
         AND salience >= $minSalience
         AND (valid_until IS NONE OR valid_until > time::now())
-      ORDER BY bm25_score DESC, salience DESC
+      ORDER BY salience DESC
       LIMIT $limit;
     `,
     params: { query, scope, minSalience, limit },
