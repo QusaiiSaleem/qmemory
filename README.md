@@ -308,14 +308,20 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 
 This is the deepest integration. Qmemory replaces LCM entirely and manages the full session lifecycle.
 
-**Step 1: Install SurrealDB**
+**Step 1: Install SurrealDB 3.0+**
+
+> **Important:** Qmemory requires SurrealDB **v3.0 or later**. Older versions (v2.x) have incompatible syntax for schemas, FULLTEXT indexes, and record IDs. Check your version with `surreal version`.
 
 ```bash
-# macOS
+# macOS (installs latest v3)
 brew install surrealdb/tap/surreal
 
-# Linux
+# Linux (installs latest v3)
 curl -sSf https://install.surrealdb.com | sh
+
+# Verify version — must be 3.x
+surreal version
+# Expected: surreal 3.0.0 or higher
 
 # Start the server (data persists to disk)
 surreal start --user root --pass root file:~/.qmemory/data.db
@@ -398,9 +404,11 @@ Add Qmemory as an MCP server in your Claude Code configuration.
 npm install -g qmemory
 ```
 
-**Step 2: Start SurrealDB**
+**Step 2: Start SurrealDB 3.0+**
 
 ```bash
+# Install if needed (see Option 1 above for full instructions)
+surreal version  # Must be 3.x
 surreal start --user root --pass root file:~/.qmemory/data.db
 ```
 
@@ -1035,6 +1043,31 @@ bash scripts/setup-surrealdb-launchagent.sh
 ```bash
 openclaw config set plugins.slots.contextEngine "qmemory"
 openclaw gateway restart
+```
+
+---
+
+### Wrong SurrealDB version
+
+**Symptom:** Schema fails to apply, FULLTEXT index errors, `Cannot execute CREATE statement` errors, or `type::record` parse errors.
+
+**Cause:** SurrealDB v2.x has incompatible syntax. Qmemory requires v3.0+.
+
+**Fix:**
+```bash
+# Check version
+surreal version
+# If 2.x, upgrade:
+
+# macOS
+brew upgrade surrealdb/tap/surreal
+
+# Linux
+curl -sSf https://install.surrealdb.com | sh
+
+# Verify
+surreal version
+# Must show: 3.0.0 or higher
 ```
 
 ---

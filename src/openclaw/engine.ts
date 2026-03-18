@@ -170,6 +170,24 @@ export function createEngine(
         return { bootstrapped: false };
       }
 
+      // Check SurrealDB version — v3.0+ required
+      try {
+        const versionResult = await query<{ ver: string }>("RETURN server::version();");
+        const version = versionResult?.[0] as unknown as string;
+        if (version && typeof version === "string") {
+          const major = parseInt(version.replace(/[^0-9.]/g, "").split(".")[0], 10);
+          if (major < 3) {
+            logger.error(
+              `SurrealDB v${version} detected — Qmemory requires v3.0+. ` +
+              `Schema, FULLTEXT indexes, and record IDs will fail. ` +
+              `Upgrade: brew upgrade surrealdb/tap/surreal`,
+            );
+          }
+        }
+      } catch {
+        // Non-fatal — version check is best-effort
+      }
+
       // Apply schema (safe to run multiple times)
       try {
         const schemaPath = getSchemaPath();
