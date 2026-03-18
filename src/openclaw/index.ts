@@ -62,10 +62,36 @@ export default function register(api: any): void {
   const subagentRunner = createSubagentRunner(api);
 
   // 4. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
-  //    Reads from api.config.agents.defaults.memorySearch — reuses Voyage/OpenAI/Gemini
   const openclawConfig = api.config as Record<string, unknown> | undefined;
 
-  // 5. Register the context engine (replaces LCM)
+  // 5. Pre-flight: check SurrealDB health (non-blocking)
+  (async () => {
+    try {
+      const { connect, isHealthy } = await import("../db/client.js");
+      const db = await connect(config);
+      if (db) {
+        const healthy = await isHealthy();
+        if (healthy) {
+          logger.info(`SurrealDB connected: ${config.surrealdb_url}`);
+        } else {
+          logger.warn(
+            `SurrealDB at ${config.surrealdb_url} is not responding. ` +
+            `Run: surreal start --user root --pass root file:~/.qmemory/data.db`
+          );
+        }
+      } else {
+        logger.warn(
+          `Cannot connect to SurrealDB at ${config.surrealdb_url}. ` +
+          `Qmemory will run in degraded mode (no memory persistence). ` +
+          `To fix: bash /path/to/Qmemory/scripts/setup-surrealdb-launchagent.sh`
+        );
+      }
+    } catch {
+      // Non-fatal — bootstrap() will retry
+    }
+  })();
+
+  // 6. Register the context engine (replaces LCM)
   const engine = createEngine(config, logger, subagentRunner, openclawConfig);
   api.registerContextEngine("qmemory", () => engine);
 

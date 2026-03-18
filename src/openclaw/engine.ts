@@ -169,11 +169,33 @@ export function createEngine(
         return { bootstrapped: false };
       }
 
-      // Apply schema (safe to run multiple times — uses IF NOT EXISTS)
+      // Apply schema (safe to run multiple times)
       try {
         const schemaPath = getSchemaPath();
         const schemaSurql = await readFile(schemaPath, "utf-8");
         await applySchema(schemaSurql);
+
+        // --- AUTO-IMPORT: First run detection ---
+        // If 0 memories exist, auto-import old memory files
+        const memCount = await query<{ count: number }>(
+          "SELECT count() AS count FROM memory GROUP ALL;"
+        );
+        if (memCount && memCount.length > 0 && memCount[0].count === 0) {
+          logger.info("First run detected (0 memories) — auto-importing workspace memory files...");
+          try {
+            const { migrateWorkspaceMemories, setMigrateLogger } = await import("../core/migrate.js");
+            setMigrateLogger(logger);
+            // Detect workspace path from OpenClaw config or default
+            const workspacePath = (openclawConfig as any)?.workspace?.path
+              ?? join(process.env.HOME ?? "", ".openclaw", "workspace");
+            const result = await migrateWorkspaceMemories(workspacePath, subagentRunner);
+            logger.info(
+              `Auto-import complete: ${result.files_read} files, ${result.memories_created} memories, ${result.relationships_created} relationships`
+            );
+          } catch (importError) {
+            logger.warn(`Auto-import failed (non-fatal): ${importError}`);
+          }
+        }
       } catch (error) {
         logger.error(`Failed to load/apply schema: ${error}`);
         return { bootstrapped: false };
