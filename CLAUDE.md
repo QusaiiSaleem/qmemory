@@ -23,8 +23,12 @@ npx fastmcp dev src/mcp/server.ts              # Interactive MCP inspector
 # OpenClaw plugin (symlink dev mode)
 openclaw plugins install -l /path/to/Qmemory
 openclaw config set plugins.slots.contextEngine "qmemory"
+openclaw config set tools.alsoAllow '["group:plugins"]'
 openclaw gateway restart
-openclaw plugins inspect qmemory               # Verify loaded
+openclaw plugins list | grep qmemory           # Verify loaded
+
+# After code changes:
+npm run build && pkill -f openclaw && sleep 2 && openclaw gateway start
 
 # Debugging
 openclaw logs --follow | grep qmemory          # Plugin logs
@@ -37,7 +41,7 @@ surreal sql -e http://localhost:8000 -u root -p root --namespace qmemory --datab
 src/
 ├── core/           ← SHARED logic (recall, save, search, correct, link, extract, dedup, embeddings, migrate)
 ├── db/             ← SurrealDB connection + parameterized queries
-├── openclaw/       ← ENTRY 1: Context engine plugin (replaces LCM) + 5 tools + linker service
+├── openclaw/       ← ENTRY 1: Context engine plugin (replaces LCM) + 6 tools + linker service
 ├── mcp/            ← ENTRY 2: FastMCP server (4 tools for Claude Code/Claude.ai)
 ├── cli.ts          ← ENTRY 3: CLI (npx qmemory serve|serve-http|status|schema)
 ├── config.ts       ← All types, constants, formatMemories()
@@ -65,7 +69,7 @@ Schema file: `schema/qmemory.surql`
 - **Token budget** — memory injection capped at 15% of context window, sorted by salience DESC
 - **Session key parsing** — `parseSessionKey()` in `engine.ts` extracts topic/group/channel automatically
 
-## OpenClaw Plugin Tools (5 tools)
+## OpenClaw Plugin Tools (6 tools)
 
 | Tool | What It Does |
 |------|-------------|
@@ -74,6 +78,7 @@ Schema file: `schema/qmemory.surql`
 | `qmemory_correct` | Fix or soft-delete a memory (version chain preserved) |
 | `qmemory_link` | Create dynamic `relates` edge (any relationship type) |
 | `qmemory_import` | Import a .md file into the graph (for migration) |
+| `qmemory_person` | Create/find a person with linked identities across systems |
 
 ## Context Engine Methods
 
@@ -108,6 +113,9 @@ Entities can reference external systems (email, tasks, Smartsheet):
 
 ## Gotchas
 
+- **`tools.alsoAllow: ["group:plugins"]` MUST be in openclaw.json** — the `coding` profile filters out ALL plugin tools via `applyToolPolicyPipeline`. Without this, tools register silently but the agent never sees them
+- **AgentTool interface requires `label` field** on every tool (e.g., `label: "Qmemory Search"`)
+- **`openclaw plugins inspect` does not exist** — use `openclaw plugins list` instead
 - SurrealDB must be running BEFORE OpenClaw gateway starts (or Qmemory runs in degraded mode)
 - Schema is applied on every `bootstrap()` — safe (idempotent) but logs on first run
 - `relates` edge accepts ANY node type as IN/OUT — validate both exist before creating
@@ -115,6 +123,8 @@ Entities can reference external systems (email, tasks, Smartsheet):
 - Embedding index must be enabled explicitly via `enableVectorIndex()` when embedding provider is set
 - FastMCP uses Zod for schemas, OpenClaw uses TypeBox — core/ functions accept plain objects (framework-agnostic)
 - The `qmemory_import` tool uses dynamic import to avoid loading `migrate.ts` unless needed
+- OpenClaw logs: `/tmp/openclaw/openclaw-$(date +%Y-%m-%d).log` (JSON format, grep `"1":"message"`)
+- OpenClaw source: `/opt/homebrew/lib/node_modules/openclaw/dist/` for debugging internals
 
 ## Config
 
@@ -128,4 +138,4 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 
 ## Dependencies
 
-Only 2 runtime deps: `surrealdb` (official JS SDK) + `fastmcp` (MCP server framework)
+Only 3 runtime deps: `surrealdb` (official JS SDK) + `fastmcp` (MCP server framework) + `@sinclair/typebox` (OpenClaw tool schemas)

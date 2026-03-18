@@ -37,6 +37,7 @@
 - [How Memory Updates](#-how-memory-updates)
 - [External References](#-external-references)
 - [Community Issues Solved](#-community-issues-solved)
+- [Troubleshooting](#-troubleshooting)
 - [Development](#-development)
 - [Wiki / Reference Files](#-wiki--reference-files)
 - [License](#-license)
@@ -335,7 +336,17 @@ openclaw plugins install qmemory
 openclaw config set plugins.slots.contextEngine "qmemory"
 ```
 
-**Step 4: (Optional) Configure the plugin**
+**Step 4: Enable plugin tools**
+
+The `coding` tool profile only includes core tools by default. You must add `group:plugins` to make Qmemory's tools visible to the agent:
+
+```bash
+openclaw config set tools.alsoAllow '["group:plugins"]'
+```
+
+> **Without this step, Qmemory's 6 tools will not appear in the agent's tool list.** The plugin will load and inject memories, but the agent cannot save, search, correct, or link memories on its own.
+
+**Step 5: (Optional) Configure the plugin**
 
 ```bash
 # Set SurrealDB password (default: root)
@@ -345,13 +356,13 @@ openclaw config set plugins.config.qmemory.surrealdb_pass "your-password"
 openclaw config set plugins.config.qmemory.embedding_provider "auto"
 ```
 
-**Step 5: Restart the gateway**
+**Step 6: Restart the gateway**
 
 ```bash
 openclaw gateway restart
 ```
 
-**Step 6: Verify**
+**Step 7: Verify**
 
 ```bash
 openclaw plugins inspect qmemory
@@ -952,6 +963,129 @@ Qmemory was built to fix real problems reported in the OpenClaw community:
 
 ---
 
+## 🔍 Troubleshooting
+
+### Agent can't see Qmemory tools
+
+**Symptom:** Plugin loads (logs show "Qmemory plugin loaded") but agent lists only core tools (read, write, exec, etc.) — no `qmemory_*` tools.
+
+**Cause:** OpenClaw's `tools.profile: "coding"` has a hardcoded allowlist of core tools. Plugin tools are filtered out unless explicitly allowed.
+
+**Fix:**
+```bash
+openclaw config set tools.alsoAllow '["group:plugins"]'
+openclaw gateway restart
+```
+
+This adds ALL plugin tools (not just Qmemory) to the agent's available tools. You only need to do this once.
+
+---
+
+### SurrealDB not running
+
+**Symptom:** Plugin loads but no memories are saved or recalled. Logs show "Cannot connect to SurrealDB" or agent runs in "degraded mode."
+
+**Fix:**
+```bash
+# Start SurrealDB
+surreal start --user root --pass root file:~/.qmemory/data.db
+
+# Verify
+qmemory status
+
+# (Optional) Auto-start on macOS login
+bash scripts/setup-surrealdb-launchagent.sh
+```
+
+> SurrealDB must be running **before** the OpenClaw gateway starts. If you start SurrealDB after, restart the gateway: `openclaw gateway restart`
+
+---
+
+### Context engine not active
+
+**Symptom:** Tools work but memories are not auto-injected into conversations. No compaction. No cross-session recall.
+
+**Cause:** The context engine slot is not set to Qmemory.
+
+**Fix:**
+```bash
+openclaw config set plugins.slots.contextEngine "qmemory"
+openclaw gateway restart
+```
+
+---
+
+### Schema not applied
+
+**Symptom:** SurrealDB is running but queries fail with "table not found" errors.
+
+**Fix:** The schema is auto-applied on the first session (`bootstrap()`). If you need to apply it manually:
+```bash
+qmemory schema
+# or
+npx tsx src/cli.ts schema
+```
+
+---
+
+### Plugin not loaded
+
+**Symptom:** No "Qmemory plugin loaded" message in logs.
+
+**Fix:**
+```bash
+# Check plugin status
+openclaw plugins list | grep qmemory
+
+# Ensure it's enabled
+openclaw config set plugins.entries.qmemory.enabled true
+
+# Ensure it's in the allowlist
+openclaw config set plugins.allow '["qmemory"]'
+
+# Restart
+openclaw gateway restart
+```
+
+---
+
+### Tools registered but returning errors
+
+**Symptom:** Agent sees `qmemory_*` tools but they fail with connection errors.
+
+**Fix:** Check that SurrealDB is running and accessible:
+```bash
+qmemory status
+# Should show: Qmemory: connected
+```
+
+If it shows "disconnected", restart SurrealDB and the gateway.
+
+---
+
+### Quick diagnostic checklist
+
+```bash
+# 1. Is SurrealDB running?
+qmemory status
+
+# 2. Is the plugin loaded?
+openclaw plugins list | grep qmemory
+
+# 3. Is the context engine set?
+openclaw config get plugins.slots.contextEngine
+# Should show: "qmemory"
+
+# 4. Are plugin tools allowed?
+openclaw config get tools.alsoAllow
+# Should include: "group:plugins"
+
+# 5. Check logs for errors
+openclaw logs --follow | grep -i "qmemory\|surreal\|error"
+```
+
+---
+
 ## 🛠️ Development
 
 ### Setup
@@ -987,6 +1121,7 @@ npm run dev
 # Link as OpenClaw plugin (dev mode — no npm publish needed)
 openclaw plugins install -l /path/to/qmemory
 openclaw config set plugins.slots.contextEngine "qmemory"
+openclaw config set tools.alsoAllow '["group:plugins"]'
 openclaw gateway restart
 ```
 
@@ -1026,7 +1161,7 @@ src/
 │   ├── client.ts       ← SurrealDB connection + parameterized queries
 │   └── queries.ts      ← Reusable query helpers
 ├── openclaw/           ← ENTRY 1: Context engine plugin
-│   ├── index.ts        ← Plugin registration (5 tools + engine + linker)
+│   ├── index.ts        ← Plugin registration (6 tools + engine + linker)
 │   ├── engine.ts       ← Full context engine (bootstrap/ingest/assemble/compact)
 │   └── linker.ts       ← Background services (link + reflect)
 ├── mcp/

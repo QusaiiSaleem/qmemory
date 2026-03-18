@@ -91,7 +91,21 @@ export default function register(api: any): void {
     }
   })();
 
-  // 6. Register the context engine (replaces LCM)
+  // 6. Check tools.alsoAllow config — warn if plugin tools will be hidden
+  const toolsConfig = (openclawConfig as any)?.tools;
+  const alsoAllow: string[] = toolsConfig?.alsoAllow ?? [];
+  const hasPluginGroup = alsoAllow.some(
+    (entry: string) => entry === "group:plugins" || entry === "qmemory",
+  );
+  if (!hasPluginGroup && toolsConfig?.profile) {
+    logger.warn(
+      `tools.profile="${toolsConfig.profile}" is set but tools.alsoAllow does not include "group:plugins". ` +
+      `Qmemory tools will NOT be visible to the agent. ` +
+      `Fix: openclaw config set tools.alsoAllow '["group:plugins"]'`,
+    );
+  }
+
+  // 7. Register the context engine (replaces LCM)
   const engine = createEngine(config, logger, subagentRunner, openclawConfig);
   api.registerContextEngine("qmemory", () => engine);
 
@@ -103,6 +117,7 @@ export default function register(api: any): void {
   api.registerTool(
     {
       name: "qmemory_search",
+      label: "Qmemory Search",
       description:
         "Search cross-session memory by meaning, category, scope, or graph traversal. " +
         "Use when you need to recall past knowledge from any session or topic.",
@@ -141,13 +156,14 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_search" },
+    { name: "qmemory_search", optional: false },
   );
 
   // Tool 2: qmemory_save — save a fact with LLM dedup
   api.registerTool(
     {
       name: "qmemory_save",
+      label: "Qmemory Save",
       description:
         "Save a fact to cross-session memory with LLM-driven deduplication. " +
         "The system will check for duplicates and update existing memories if needed.",
@@ -190,13 +206,14 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_save" },
+    { name: "qmemory_save", optional: false },
   );
 
   // Tool 3: qmemory_correct — fix or delete a wrong memory
   api.registerTool(
     {
       name: "qmemory_correct",
+      label: "Qmemory Correct",
       description:
         "Fix, update, delete, or unlink memories and relationships. " +
         "4 actions: 'correct' = fix content (creates version chain), " +
@@ -246,13 +263,14 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_correct" },
+    { name: "qmemory_correct", optional: false },
   );
 
   // Tool 4: qmemory_link — create a relationship between any two things
   api.registerTool(
     {
       name: "qmemory_link",
+      label: "Qmemory Link",
       description:
         "Create a relationship between any two things in memory. " +
         "The type can be ANY relationship — supports, contradicts, manages, " +
@@ -287,13 +305,14 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_link" },
+    { name: "qmemory_link", optional: false },
   );
 
   // Tool 5: qmemory_import — import a file into the memory graph
   api.registerTool(
     {
       name: "qmemory_import",
+      label: "Qmemory Import",
       description:
         "Import a memory file into the Qmemory graph. " +
         "Reads the file, extracts facts using AI, saves with dedup, " +
@@ -325,13 +344,14 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_import" },
+    { name: "qmemory_import", optional: false },
   );
 
   // Tool 6: qmemory_person — create/find a person with linked identities
   api.registerTool(
     {
       name: "qmemory_person",
+      label: "Qmemory Person",
       description:
         "Create or find a person with multiple linked identities (WhatsApp, email, " +
         "Telegram, Smartsheet, etc). A person can have many contacts — each linked " +
@@ -410,7 +430,7 @@ export default function register(api: any): void {
         };
       },
     },
-    { name: "qmemory_person" },
+    { name: "qmemory_person", optional: false },
   );
 
   // ----- SERVICE: Background Linker -----
@@ -427,5 +447,5 @@ export default function register(api: any): void {
     description: "Interactive graph viewer for Qmemory",
   });
 
-  logger.info("Qmemory plugin loaded (context engine + 4 tools + linker + graph route)");
+  logger.info("Qmemory plugin loaded (context engine + 6 tools + linker + graph route)");
 }
