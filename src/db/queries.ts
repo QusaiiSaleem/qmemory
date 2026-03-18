@@ -149,6 +149,52 @@ export function getRecentMemories(limit: number): PreparedQuery {
 }
 
 /**
+ * Get the full graph picture for the agent.
+ * Returns entities + their connections + orphan count + stats.
+ * This is the "world map" the agent sees at session start.
+ */
+export function getGraphSummary(): PreparedQuery {
+  return {
+    surql: `
+      -- 1. All entities with their relationship counts
+      SELECT
+        id, name, type, aliases, external_source, external_id,
+        count(->relates) AS outgoing,
+        count(<-relates) AS incoming
+      FROM entity
+      ORDER BY (outgoing + incoming) DESC
+      LIMIT 30;
+
+      -- 2. All relationship edges (up to 100)
+      SELECT
+        in AS from,
+        out AS to,
+        type,
+        reason,
+        created_by
+      FROM relates
+      ORDER BY created_at DESC
+      LIMIT 100;
+
+      -- 3. Orphan memories (no relationships — need linking)
+      SELECT count() AS count FROM memory
+      WHERE is_active = true
+        AND count(->relates) = 0
+        AND count(<-relates) = 0
+      GROUP ALL;
+
+      -- 4. Total stats
+      SELECT
+        (SELECT count() FROM memory WHERE is_active = true GROUP ALL)[0].count AS memories,
+        (SELECT count() FROM entity GROUP ALL)[0].count AS entities,
+        (SELECT count() FROM relates GROUP ALL)[0].count AS edges,
+        (SELECT count() FROM session GROUP ALL)[0].count AS sessions;
+    `,
+    params: {},
+  };
+}
+
+/**
  * Get memories for a specific scope, valid at a given time,
  * above a minimum salience threshold.
  */

@@ -362,3 +362,111 @@ export function formatMemories(
 
   return sections.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Graph map format — shows entities + relationships as a navigable world
+// ---------------------------------------------------------------------------
+
+export interface GraphEntity {
+  id: string;
+  name: string;
+  type: string;
+  aliases?: string[];
+  external_source?: string;
+  external_id?: string;
+  outgoing: number;
+  incoming: number;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  type: string;
+  reason?: string;
+}
+
+export interface GraphStats {
+  memories: number;
+  entities: number;
+  edges: number;
+  sessions: number;
+  orphans: number;
+}
+
+/**
+ * Format the graph summary as a world map for the agent.
+ * Shows entities grouped by type, relationships between them,
+ * and a nudge about orphan memories that need linking.
+ */
+export function formatGraphMap(
+  entities: GraphEntity[],
+  edges: GraphEdge[],
+  stats: GraphStats,
+): string {
+  if (entities.length === 0 && edges.length === 0) return "";
+
+  const sections: string[] = [
+    "### Knowledge Graph",
+    `_${stats.entities} entities, ${stats.edges} relationships, ${stats.memories} memories_`,
+  ];
+
+  // Group entities by type
+  const byType: Record<string, GraphEntity[]> = {};
+  for (const e of entities) {
+    const t = e.type || "other";
+    if (!byType[t]) byType[t] = [];
+    byType[t].push(e);
+  }
+
+  // Display order for entity types
+  const typeLabels: Record<string, string> = {
+    person: "People",
+    project: "Projects",
+    org: "Organizations",
+    system: "Systems",
+    concept: "Concepts",
+    contact: "Contacts",
+  };
+
+  for (const [type, label] of Object.entries(typeLabels)) {
+    const items = byType[type];
+    if (!items || items.length === 0) continue;
+
+    sections.push("", `**${label}**`);
+    for (const e of items.slice(0, 10)) {
+      // Find relationships for this entity
+      const rels = edges.filter(
+        (r) => String(r.from) === String(e.id) || String(r.to) === String(e.id),
+      );
+      const relStr = rels.slice(0, 3).map((r) => {
+        const other = String(r.from) === String(e.id) ? String(r.to) : String(r.from);
+        // Extract just the name part from record ID
+        const otherName = other.split(":").slice(1).join(":");
+        return `${r.type} → ${otherName}`;
+      }).join(", ");
+
+      const ext = e.external_source ? ` (${e.external_source})` : "";
+      const connections = relStr ? ` | ${relStr}` : "";
+      sections.push(`- ${e.name}${ext}${connections}`);
+    }
+  }
+
+  // Show any remaining types not in the predefined list
+  for (const [type, items] of Object.entries(byType)) {
+    if (typeLabels[type] || items.length === 0) continue;
+    sections.push("", `**${type}**`);
+    for (const e of items.slice(0, 5)) {
+      sections.push(`- ${e.name}`);
+    }
+  }
+
+  // Orphan nudge — encourage agent to build relationships
+  if (stats.orphans > 0) {
+    sections.push(
+      "",
+      `_${stats.orphans} memories have no relationships yet. Use qmemory_link to connect them._`,
+    );
+  }
+
+  return sections.join("\n");
+}
