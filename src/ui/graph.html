@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Qmemory Graph</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    /* ---------------------------------------------------------------
+       Dark theme, full-screen graph
+       Arabic-friendly: Cairo font, RTL support
+       --------------------------------------------------------------- */
+    @import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap");
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Cairo", sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* -- Top controls bar -- */
+    #controls {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-wrap: wrap;
+      align-items: center;
+      z-index: 10;
+    }
+
+    #controls label {
+      font-size: 13px;
+      color: #8b949e;
+    }
+
+    #controls select,
+    #controls input {
+      background: #0d1117;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: "Cairo", sans-serif;
+      font-size: 13px;
+    }
+
+    #controls select:focus,
+    #controls input:focus {
+      border-color: #58a6ff;
+      outline: none;
+    }
+
+    #controls button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 16px;
+      font-family: "Cairo", sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #controls button:hover {
+      background: #2ea043;
+    }
+
+    #controls button.secondary {
+      background: #30363d;
+    }
+
+    #controls button.secondary:hover {
+      background: #484f58;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* -- Stats bar -- */
+    #stats {
+      font-size: 12px;
+      color: #8b949e;
+      margin-inline-start: auto;
+    }
+
+    /* -- Main layout: graph + details panel -- */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #graph {
+      flex: 1;
+      background: #0d1117;
+    }
+
+    /* -- Details panel (right side) -- */
+    #details {
+      width: 320px;
+      background: #161b22;
+      border-inline-start: 1px solid #30363d;
+      padding: 16px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    #details.visible {
+      display: block;
+    }
+
+    #details h2 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #f0f6fc;
+    }
+
+    #details .field {
+      margin-bottom: 10px;
+    }
+
+    #details .field-label {
+      font-size: 11px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    #details .field-value {
+      font-size: 14px;
+      color: #c9d1d9;
+      margin-top: 2px;
+      word-break: break-word;
+    }
+
+    #details .connections {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #30363d;
+    }
+
+    #details .connection-item {
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      background: #0d1117;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #details .connection-item:hover {
+      background: #1c2128;
+    }
+
+    #details .edge-type {
+      color: #f78166;
+      font-size: 11px;
+    }
+
+    #details .close-btn {
+      position: absolute;
+      top: 12px;
+      inset-inline-end: 12px;
+      background: none;
+      border: none;
+      color: #8b949e;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    /* -- Loading overlay -- */
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(13, 17, 23, 0.8);
+      z-index: 20;
+      font-size: 16px;
+    }
+
+    #loading.hidden {
+      display: none;
+    }
+
+    /* -- RTL support -- */
+    [dir="rtl"] #details {
+      border-inline-start: 1px solid #30363d;
+      border-inline-end: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Controls bar -->
+  <div id="controls">
+    <div class="control-group">
+      <label for="filter-category">Category:</label>
+      <select id="filter-category">
+        <option value="all">All</option>
+        <option value="style">style</option>
+        <option value="preference">preference</option>
+        <option value="context">context</option>
+        <option value="decision">decision</option>
+        <option value="idea">idea</option>
+        <option value="feedback">feedback</option>
+        <option value="domain">domain</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="filter-scope">Scope:</label>
+      <select id="filter-scope">
+        <option value="all">All</option>
+        <option value="global">global</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="filter-date-from">From:</label>
+      <input type="date" id="filter-date-from" />
+    </div>
+
+    <div class="control-group">
+      <label for="filter-date-to">To:</label>
+      <input type="date" id="filter-date-to" />
+    </div>
+
+    <button onclick="loadGraph()">Refresh</button>
+    <button class="secondary" onclick="resetFilters()">Reset</button>
+
+    <span id="stats"></span>
+  </div>
+
+  <!-- Main area -->
+  <div id="main">
+    <div id="graph"></div>
+    <div id="details">
+      <button class="close-btn" onclick="closeDetails()">&times;</button>
+      <div id="details-content"></div>
+    </div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div id="loading">Loading graph data...</div>
+
+  <script>
+    // =====================================================================
+    // Configuration
+    // =====================================================================
+
+    // API endpoint — served by graph-handler.ts
+    const API_URL = "./api/graph";
+
+    // Color map: node type -> { background, border }
+    const NODE_COLORS = {
+      memory:  { background: "#1f6feb", border: "#58a6ff", font: "#fff" },
+      entity:  { background: "#238636", border: "#3fb950", font: "#fff" },
+      session: { background: "#484f58", border: "#8b949e", font: "#c9d1d9" },
+    };
+
+    // Category-specific colors for memory nodes
+    const CATEGORY_COLORS = {
+      style:      { background: "#8957e5", border: "#bc8cff" },
+      preference: { background: "#1f6feb", border: "#58a6ff" },
+      context:    { background: "#0969da", border: "#54aeff" },
+      decision:   { background: "#bf8700", border: "#e3b341" },
+      idea:       { background: "#a371f7", border: "#d2a8ff" },
+      feedback:   { background: "#f78166", border: "#ffa198" },
+      domain:     { background: "#3fb950", border: "#56d364" },
+    };
+
+    // =====================================================================
+    // State
+    // =====================================================================
+
+    var network = null;     // vis.js Network instance
+    var graphData = null;   // Raw data from API
+
+    // =====================================================================
+    // Graph loading
+    // =====================================================================
+
+    async function loadGraph() {
+      var loading = document.getElementById("loading");
+      loading.classList.remove("hidden");
+
+      try {
+        // Build query params from filters
+        var params = new URLSearchParams();
+        var category = document.getElementById("filter-category").value;
+        var scope = document.getElementById("filter-scope").value;
+        var dateFrom = document.getElementById("filter-date-from").value;
+        var dateTo = document.getElementById("filter-date-to").value;
+
+        if (category !== "all") params.set("category", category);
+        if (scope !== "all") params.set("scope", scope);
+        if (dateFrom) params.set("from", dateFrom);
+        if (dateTo) params.set("to", dateTo);
+
+        var url = params.toString() ? API_URL + "?" + params.toString() : API_URL;
+        var response = await fetch(url);
+
+        if (!response.ok) {
+          throw new Error("API error: " + response.status + " " + response.statusText);
+        }
+
+        graphData = await response.json();
+        renderGraph(graphData);
+
+        // Update scope filter options from data
+        updateScopeOptions(graphData.nodes);
+
+        // Update stats
+        document.getElementById("stats").textContent =
+          graphData.nodes.length + " nodes, " + graphData.edges.length + " edges";
+      } catch (error) {
+        console.error("Failed to load graph:", error);
+        document.getElementById("stats").textContent = "Error loading graph";
+      } finally {
+        loading.classList.add("hidden");
+      }
+    }
+
+    // =====================================================================
+    // Graph rendering
+    // =====================================================================
+
+    function renderGraph(data) {
+      var container = document.getElementById("graph");
+
+      // Transform nodes for vis.js
+      var nodes = new vis.DataSet(
+        data.nodes.map(function(node) {
+          var typeColors = NODE_COLORS[node.type] || NODE_COLORS.memory;
+          var colors = typeColors;
+
+          // Use category-specific color for memory nodes
+          if (node.type === "memory" && node.category && CATEGORY_COLORS[node.category]) {
+            colors = Object.assign({}, typeColors, CATEGORY_COLORS[node.category]);
+          }
+
+          // Scale node size by salience (for memories)
+          var baseSize = node.type === "memory" ? 16 : node.type === "entity" ? 20 : 12;
+          var size = node.salience ? baseSize + node.salience * 14 : baseSize;
+
+          return {
+            id: node.id,
+            label: truncate(node.label || node.id, 30),
+            title: buildTooltip(node),
+            size: size,
+            color: {
+              background: colors.background,
+              border: colors.border,
+              highlight: { background: colors.border, border: "#fff" },
+            },
+            font: { color: colors.font || "#fff", size: 11, face: "Cairo" },
+            shape: node.type === "entity" ? "diamond" : node.type === "session" ? "square" : "dot",
+            _data: node,
+          };
+        })
+      );
+
+      // Transform edges for vis.js
+      var edges = new vis.DataSet(
+        data.edges.map(function(edge, i) {
+          return {
+            id: edge.id || "edge-" + i,
+            from: edge.from,
+            to: edge.to,
+            label: edge.type || "",
+            title: edge.reason || edge.type,
+            color: { color: "#30363d", highlight: "#58a6ff" },
+            font: { color: "#8b949e", size: 9, face: "Cairo", strokeWidth: 0 },
+            arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+            smooth: { type: "continuous" },
+            _data: edge,
+          };
+        })
+      );
+
+      // vis.js network options
+      var options = {
+        physics: {
+          solver: "forceAtlas2Based",
+          forceAtlas2Based: {
+            gravitationalConstant: -40,
+            centralGravity: 0.005,
+            springLength: 120,
+            springConstant: 0.08,
+          },
+          stabilization: { iterations: 150 },
+        },
+        interaction: {
+          hover: true,
+          tooltipDelay: 200,
+          zoomView: true,
+          dragView: true,
+        },
+        nodes: {
+          borderWidth: 2,
+          borderWidthSelected: 3,
+        },
+        edges: {
+          width: 1,
+          selectionWidth: 2,
+        },
+      };
+
+      // Create or update network
+      if (network) {
+        network.destroy();
+      }
+      network = new vis.Network(container, { nodes: nodes, edges: edges }, options);
+
+      // Click handler: show details panel
+      network.on("click", function(event) {
+        if (event.nodes.length > 0) {
+          var nodeId = event.nodes[0];
+          var node = nodes.get(nodeId);
+          showDetails(node._data, data.edges);
+        } else {
+          closeDetails();
+        }
+      });
+    }
+
+    // =====================================================================
+    // Details panel — uses safe DOM methods (no innerHTML)
+    // =====================================================================
+
+    function showDetails(node, allEdges) {
+      var panel = document.getElementById("details");
+      var content = document.getElementById("details-content");
+
+      // Clear existing content safely
+      while (content.firstChild) {
+        content.removeChild(content.firstChild);
+      }
+
+      // Title
+      var title = document.createElement("h2");
+      title.textContent = node.label || node.id;
+      content.appendChild(title);
+
+      // Build field list based on node type
+      var fields = [
+        ["Type", node.type],
+        ["ID", node.id],
+      ];
+
+      if (node.type === "memory") {
+        fields.push(
+          ["Content", node.content],
+          ["Category", node.category],
+          ["Salience", node.salience],
+          ["Scope", node.scope],
+          ["Source", node.source_type],
+          ["Created", formatDate(node.created_at)]
+        );
+      } else if (node.type === "entity") {
+        fields.push(
+          ["Entity Type", node.entity_type],
+          ["Aliases", (node.aliases || []).join(", ") || "none"],
+          ["Created", formatDate(node.created_at)]
+        );
+      } else if (node.type === "session") {
+        fields.push(
+          ["Channel", node.channel],
+          ["Chat Type", node.chat_type],
+          ["Scope", node.scope],
+          ["Last Active", formatDate(node.last_active)]
+        );
+      }
+
+      // Render fields using DOM methods
+      for (var i = 0; i < fields.length; i++) {
+        var label = fields[i][0];
+        var value = fields[i][1];
+        if (value !== undefined && value !== null) {
+          var fieldDiv = document.createElement("div");
+          fieldDiv.className = "field";
+
+          var labelDiv = document.createElement("div");
+          labelDiv.className = "field-label";
+          labelDiv.textContent = label;
+          fieldDiv.appendChild(labelDiv);
+
+          var valueDiv = document.createElement("div");
+          valueDiv.className = "field-value";
+          valueDiv.textContent = String(value);
+          fieldDiv.appendChild(valueDiv);
+
+          content.appendChild(fieldDiv);
+        }
+      }
+
+      // Connected edges
+      var connected = allEdges.filter(function(e) {
+        return e.from === node.id || e.to === node.id;
+      });
+
+      if (connected.length > 0) {
+        var connSection = document.createElement("div");
+        connSection.className = "connections";
+
+        var connTitle = document.createElement("h2");
+        connTitle.textContent = "Connections (" + connected.length + ")";
+        connSection.appendChild(connTitle);
+
+        for (var j = 0; j < connected.length; j++) {
+          var edge = connected[j];
+          var other = edge.from === node.id ? edge.to : edge.from;
+          var direction = edge.from === node.id ? "\u2192" : "\u2190";
+
+          var item = document.createElement("div");
+          item.className = "connection-item";
+          item.setAttribute("data-node-id", other);
+          item.addEventListener("click", (function(targetId) {
+            return function() { focusNode(targetId); };
+          })(other));
+
+          var typeSpan = document.createElement("span");
+          typeSpan.className = "edge-type";
+          typeSpan.textContent = edge.type || "relates";
+          item.appendChild(typeSpan);
+
+          var dirText = document.createTextNode(" " + direction + " " + truncate(other, 35));
+          item.appendChild(dirText);
+
+          if (edge.reason) {
+            var br = document.createElement("br");
+            item.appendChild(br);
+            var reasonSmall = document.createElement("small");
+            reasonSmall.style.color = "#8b949e";
+            reasonSmall.textContent = edge.reason;
+            item.appendChild(reasonSmall);
+          }
+
+          connSection.appendChild(item);
+        }
+
+        content.appendChild(connSection);
+      }
+
+      panel.classList.add("visible");
+    }
+
+    function closeDetails() {
+      document.getElementById("details").classList.remove("visible");
+    }
+
+    function focusNode(nodeId) {
+      if (network) {
+        network.selectNodes([nodeId]);
+        network.focus(nodeId, { scale: 1.5, animation: true });
+        // Trigger details for the focused node
+        var node = network.body.data.nodes.get(nodeId);
+        if (node && node._data) {
+          showDetails(node._data, graphData.edges);
+        }
+      }
+    }
+
+    // =====================================================================
+    // Filter helpers
+    // =====================================================================
+
+    function updateScopeOptions(nodes) {
+      var select = document.getElementById("filter-scope");
+      var currentValue = select.value;
+      var scopes = new Set(["all", "global"]);
+
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].scope) scopes.add(nodes[i].scope);
+      }
+
+      // Rebuild options using DOM methods
+      while (select.firstChild) {
+        select.removeChild(select.firstChild);
+      }
+
+      scopes.forEach(function(scope) {
+        var option = document.createElement("option");
+        option.value = scope;
+        option.textContent = scope === "all" ? "All" : scope;
+        if (scope === currentValue) option.selected = true;
+        select.appendChild(option);
+      });
+    }
+
+    function resetFilters() {
+      document.getElementById("filter-category").value = "all";
+      document.getElementById("filter-scope").value = "all";
+      document.getElementById("filter-date-from").value = "";
+      document.getElementById("filter-date-to").value = "";
+      loadGraph();
+    }
+
+    // =====================================================================
+    // Utilities
+    // =====================================================================
+
+    function truncate(text, maxLen) {
+      if (!text) return "";
+      return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;
+    }
+
+    function formatDate(isoString) {
+      if (!isoString) return "\u2014";
+      try {
+        return new Date(isoString).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } catch (e) {
+        return isoString;
+      }
+    }
+
+    function buildTooltip(node) {
+      if (node.type === "memory") {
+        return "[" + node.category + "] " + (node.content || "") + "\nSalience: " + (node.salience || "?");
+      }
+      if (node.type === "entity") {
+        return (node.entity_type || "entity") + ": " + node.label;
+      }
+      return node.type + ": " + (node.label || node.id);
+    }
+
+    // =====================================================================
+    // Initialize on page load
+    // =====================================================================
+
+    loadGraph();
+  </script>
+</body>
+</html>

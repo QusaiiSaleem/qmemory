@@ -1,0 +1,46 @@
+{
+  "id": "qmemory",
+  "kind": "context-engine",
+  "name": "Qmemory",
+  "description": "Graph memory context engine powered by SurrealDB — cross-session intelligence with salience scoring, temporal validity, and dynamic relationship graphs",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "surrealdb_url": { "type": "string", "default": "ws://localhost:8000" },
+      "surrealdb_user": { "type": "string", "default": "root" },
+      "surrealdb_pass": { "type": "string" },
+      "namespace": { "type": "string", "default": "qmemory" },
+      "database": { "type": "string", "default": "main" },
+      "context_threshold": { "type": "number", "default": 0.75 },
+      "fresh_tail_count": { "type": "integer", "default": 32 },
+      "memory_budget_pct": { "type": "number", "default": 0.15 },
+      "embedding_provider": { "type": "string", "enum": ["voyage", "openai", "gemini", "auto", "none"], "default": "auto" },
+      "embedding_api_key": { "type": "string" },
+      "embedding_model": { "type": "string" },
+      "embedding_dimension": { "type": "integer", "default": 1024 },
+      "linker_interval_ms": { "type": "integer", "default": 300000 },
+      "reflect_interval_ms": { "type": "integer", "default": 1800000 },
+      "min_salience_recall": { "type": "number", "default": 0.3 },
+      "debug": { "type": "boolean", "default": false }
+    }
+  },
+  "uiHints": {
+    "surrealdb_url": { "label": "SurrealDB URL", "placeholder": "ws://localhost:8000" },
+    "surrealdb_user": { "label": "Username", "placeholder": "root" },
+    "surrealdb_pass": { "label": "Password", "sensitive": true },
+    "namespace": { "label": "Namespace", "placeholder": "qmemory" },
+    "database": { "label": "Database", "placeholder": "main" },
+    "context_threshold": { "label": "Compaction Threshold", "help": "Compact at this % of context window (0-1)" },
+    "fresh_tail_count": { "label": "Protected Messages", "help": "Recent messages protected from compaction" },
+    "memory_budget_pct": { "label": "Memory Budget %", "help": "Max % of context for injected memories (0-1)" },
+    "embedding_provider": { "label": "Embedding Provider", "help": "'auto' = use OpenClaw's existing config (recommended). 'none' = BM25 only" },
+    "embedding_api_key": { "label": "Override API Key (optional)", "sensitive": true, "help": "Leave empty to use OpenClaw's existing embedding key" },
+    "embedding_model": { "label": "Override Model (optional)", "help": "Leave empty to use OpenClaw's existing model" },
+    "linker_interval_ms": { "label": "Linker Interval (ms)", "help": "How often the background linker runs" },
+    "reflect_interval_ms": { "label": "Reflect Interval (ms)", "help": "How often synthesis runs (expensive)" },
+    "min_salience_recall": { "label": "Min Salience for Recall", "help": "Skip memories below this importance" },
+    "debug": { "label": "Debug Mode" }
+  }
+}

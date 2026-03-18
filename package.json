@@ -1,0 +1,50 @@
+{
+  "name": "qmemory",
+  "version": "0.1.0",
+  "description": "Graph memory for AI agents — context engine for OpenClaw + MCP server for Claude Code/Claude.ai",
+  "type": "module",
+  "main": "dist/openclaw/index.js",
+  "bin": {
+    "qmemory": "./dist/cli.js"
+  },
+  "openclaw": {
+    "extensions": ["./dist/openclaw/index.js"]
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "npx fastmcp dev src/mcp/server.ts",
+    "inspect": "npx fastmcp inspect src/mcp/server.ts",
+    "start": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "surrealdb": "^2.0.2",
+    "fastmcp": "^1.27.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "tsx": "^4.0.0",
+    "@tsconfig/node22": "^22.0.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/QusaiiSaleem/qmemory"
+  },
+  "keywords": [
+    "openclaw",
+    "memory",
+    "graph",
+    "surrealdb",
+    "mcp",
+    "ai-agent",
+    "context-engine",
+    "claude"
+  ]
+}
