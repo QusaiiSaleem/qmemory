@@ -19,7 +19,7 @@ qmemory_save({
   content: "Budget approved at 500K SAR",
   category: "decision",      // style|preference|context|decision|idea|feedback|domain
   salience: 0.8,             // 0.0=trivial, 0.5=normal, 0.8=important, 1.0=critical
-  scope: "project:rakeezah"  // global|project:xxx|topic:xxx
+  scope: "project:myproject"  // global|project:xxx|topic:xxx
 })
 ```
 
@@ -32,7 +32,7 @@ qmemory_save({
 qmemory_search({
   query: "budget",                          // Full-text search
   categories: ["decision", "context"],      // Optional filter
-  scope: "project:rakeezah",               // Optional scope filter
+  scope: "project:myproject",               // Optional scope filter
   limit: 10
 })
 ```
@@ -42,9 +42,9 @@ qmemory_search({
 ```
 qmemory_link({
   from_id: "memory:budget500k",
-  to_id: "entity:dr_bandar",
+  to_id: "entity:team_lead",
   type: "approved_by",           // ANY relationship type you want
-  reason: "Dr. Bandar approved the budget via email"
+  reason: "Team lead approved the budget via email"
 })
 ```
 
@@ -118,11 +118,11 @@ User says something → Ask yourself:
 
 Create relationships when you notice:
 - **Cause/effect**: "This deployment caused that incident" → type: `caused_by`
-- **Approval chain**: "Dr. Bandar approved the budget" → type: `approved_by`
+- **Approval chain**: "Manager approved the budget" → type: `approved_by`
 - **Dependencies**: "Hiring depends on budget approval" → type: `depends_on`
 - **Contradictions**: "New info contradicts old fact" → type: `contradicts`
 - **Support**: "This evidence supports that decision" → type: `supports`
-- **People/roles**: "Qusai manages EduArabia" → type: `manages`
+- **People/roles**: "Alice manages Project X" → type: `manages`
 - **External references**: "This was discussed in an email" → type: `referenced_in`
 
 ## When to Correct (User Feedback Guide)
@@ -165,7 +165,7 @@ At the start of every conversation, you receive recalled memories in your system
 ## Cross-Session Memory (Qmemory)
 _5 memories recalled, sorted by importance_
 
-- [decision!] Budget approved at 500K by Dr. Bandar
+- [decision!] Budget approved at 500K by team lead
 - [preference!] User prefers Arabic-first, technical terms in English
 - [context] Railway deployment on us-east-1
 - [feedback] Actually 600K not 500K ← contradicts previous

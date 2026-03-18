@@ -97,7 +97,7 @@ Qmemory replaces the filing cabinet with a **connected graph**. Every fact, ever
 │  │  = 500K" │         │   ┌──────────────┐   │       │ us-east"  │  │
 │  └──────────┘         │   │ memory:m001  │   │       └──────────┘  │
 │                       │   │ "Budget 500K │   │                     │
-│  ┌──────────┐         │   │  by Dr.Bandar"│  │       ┌──────────┐  │
+│  ┌──────────┐         │   │  by team lead"│  │       ┌──────────┐  │
 │  │ Topic 9  │────────▶│   └──────┬───────┘   │◀──────│  Cron    │  │
 │  │          │         │          │supports    │       │  Job     │  │
 │  │ ✅ Knows │         │   ┌──────▼───────┐   │       └──────────┘  │
@@ -128,12 +128,12 @@ When Qmemory is active, it automatically injects relevant memories into the agen
 ## Cross-Session Memory (Qmemory)
 _5 memories recalled, sorted by importance_
 
-- [decision!] Budget approved at 500K SAR by Dr. Bandar — final, no renegotiation
+- [decision!] Budget approved at 500K SAR by team lead — final, no renegotiation
   ↳ Related: email in HEY (hey:inv-2026-003), task in Reminders
 - [context!] Railway deployment on us-east-1, SurrealDB port must be 8000
   ↳ Related: entity "Railway" (deployment), entity "SurrealDB" (system)
 - [preference] User prefers Arabic-first (RTL) with Cairo font across all projects
-- [context] Rakeezah CRM has 3 active clients: Waqf Fund, SRCA, Tamheer
+- [context] Acme CRM has 3 active clients: Waqf Fund, SRCA, Tamheer
   ↳ Scope: project:r-crm
 - [decision] Use Hotwire (not React) for all new frontends — DHH philosophy
   ↳ Expires: 2027-01-01
@@ -546,10 +546,10 @@ Save a fact to cross-session memory. Runs dedup automatically.
 **Example:**
 ```
 qmemory_save({
-  content: "Budget approved at 500K SAR by Dr. Bandar — final decision",
+  content: "Budget approved at 500K SAR by team lead — final decision",
   category: "decision",
   salience: 0.9,
-  scope: "project:rakeezah"
+  scope: "project:acme"
 })
 ```
 
@@ -910,7 +910,7 @@ Entities in Qmemory can reference external systems. This means your agent can co
 │  ┌─────────────────┐      ┌─────────────────┐                  │
 │  │ entity:ent001   │      │ memory:mem042   │                  │
 │  │                 │      │ "Invoice sent   │                  │
-│  │ name: "Invoice" │◀─────│  to Dr. Bandar" │                  │
+│  │ name: "Invoice" │◀─────│  to team lead" │                  │
 │  │ type: "email"   │      └─────────────────┘                  │
 │  │ external_source:│                                           │
 │  │   "hey"         │  ← Source system (HEY email)              │

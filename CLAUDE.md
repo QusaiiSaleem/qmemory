@@ -21,7 +21,7 @@ npx tsx src/cli.ts serve-http 3777             # HTTP transport (Claude.ai)
 npx fastmcp dev src/mcp/server.ts              # Interactive MCP inspector
 
 # OpenClaw plugin (symlink dev mode)
-openclaw plugins install -l /Users/qusaiabushanap/dev/Qmemory
+openclaw plugins install -l /path/to/Qmemory
 openclaw config set plugins.slots.contextEngine "qmemory"
 openclaw gateway restart
 openclaw plugins inspect qmemory               # Verify loaded

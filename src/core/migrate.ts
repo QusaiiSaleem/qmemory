@@ -135,7 +135,7 @@ export async function migrateWorkspaceMemories(
 
 /**
  * Import a single file into Qmemory.
- * Useful as an agent tool — Donna can call this for specific files.
+ * Useful as an agent tool — the agent can call this for specific files.
  */
 export async function importFile(
   filePath: string,
@@ -219,7 +219,7 @@ async function smartExtract(
   fileName: string,
   subagentRunner: SubagentRunner,
 ): Promise<ExtractedFact[]> {
-  const prompt = `You are reading a memory file from an AI assistant called Donna.
+  const prompt = `You are reading a memory file from an AI assistant.
 File name: ${fileName}
 
 Extract ALL important facts as a JSON array. Each fact should be:
