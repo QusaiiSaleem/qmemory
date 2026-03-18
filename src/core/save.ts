@@ -99,7 +99,7 @@ export async function saveMemory(
   if (decision.action === "UPDATE" && decision.target_id) {
     // Soft-delete the old memory
     await query(
-      `UPDATE type::thing($oldId) SET is_active = false, updated_at = time::now();`,
+      `UPDATE type::record($oldId) SET is_active = false, updated_at = time::now();`,
       { oldId: decision.target_id },
     );
     logger.debug(`Save: soft-deleted old memory ${decision.target_id}`);
@@ -107,7 +107,7 @@ export async function saveMemory(
     // Create the new memory with prev_version pointing to old
     const newId = generateId("memory:");
     await query(
-      `CREATE type::thing($newId) CONTENT {
+      `CREATE type::record($newId) CONTENT {
         content: $content,
         category: $category,
         salience: $salience,
@@ -115,7 +115,7 @@ export async function saveMemory(
         is_active: true,
         confidence: $confidence,
         source_type: $sourceType,
-        prev_version: type::thing($prevVersion),
+        prev_version: type::record($prevVersion),
         created_at: time::now(),
         updated_at: time::now()
       };`,
@@ -133,7 +133,7 @@ export async function saveMemory(
 
     // Also create a prev_version edge for graph traversal
     await query(
-      `RELATE type::thing($newId)->prev_version->type::thing($oldId);`,
+      `RELATE type::record($newId)->prev_version->type::record($oldId);`,
       { newId, oldId: decision.target_id },
     );
 
@@ -144,7 +144,7 @@ export async function saveMemory(
   // --- ADD: create a brand new memory ---
   const newId = generateId("memory:");
   await query(
-    `CREATE type::thing($newId) CONTENT {
+    `CREATE type::record($newId) CONTENT {
       content: $content,
       category: $category,
       salience: $salience,

@@ -63,7 +63,7 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
 
   // --- Validate both nodes exist ---
   const fromExists = await query(
-    `SELECT id FROM type::thing($nodeId) LIMIT 1;`,
+    `SELECT id FROM type::record($nodeId) LIMIT 1;`,
     { nodeId: from_id },
   );
   if (!fromExists || fromExists.length === 0) {
@@ -72,7 +72,7 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
   }
 
   const toExists = await query(
-    `SELECT id FROM type::thing($nodeId) LIMIT 1;`,
+    `SELECT id FROM type::record($nodeId) LIMIT 1;`,
     { nodeId: to_id },
   );
   if (!toExists || toExists.length === 0) {
@@ -83,7 +83,7 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
   // --- Create the relates edge ---
   const edgeId = generateId("relates:");
   await query(
-    `RELATE type::thing($fromId)->relates->type::thing($toId) CONTENT {
+    `RELATE type::record($fromId)->relates->type::record($toId) CONTENT {
       type: $relType,
       reason: $reason,
       confidence: 0.8,

@@ -81,7 +81,7 @@ export async function createPerson(
       const currentAliases = existing[0].aliases || [];
       const newAliases = [...new Set([...currentAliases, ...aliases])];
       await query(
-        `UPDATE type::thing($id) SET aliases = $aliases, updated_at = time::now();`,
+        `UPDATE type::record($id) SET aliases = $aliases, updated_at = time::now();`,
         { id: personId, aliases: newAliases },
       );
     }
@@ -90,7 +90,7 @@ export async function createPerson(
     // Create new person entity
     personId = `entity:${generateId("p")}`;
     await query(
-      `CREATE type::thing($id) CONTENT {
+      `CREATE type::record($id) CONTENT {
         name: $name,
         type: "person",
         aliases: $aliases,
@@ -124,7 +124,7 @@ export async function createPerson(
       contactId = `entity:${generateId("c")}`;
       const contactName = contact.label || `${name} (${contact.source})`;
       await query(
-        `CREATE type::thing($id) CONTENT {
+        `CREATE type::record($id) CONTENT {
           name: $contactName,
           type: "contact",
           aliases: [],
@@ -151,7 +151,7 @@ export async function createPerson(
     // Link person → contact via "has_identity"
     // Check if link already exists
     const existingLink = await query(
-      `SELECT * FROM relates WHERE in = type::thing($from) AND out = type::thing($to) AND type = "has_identity" LIMIT 1;`,
+      `SELECT * FROM relates WHERE in = type::record($from) AND out = type::record($to) AND type = "has_identity" LIMIT 1;`,
       { from: personId, to: contactId },
     );
 
@@ -181,7 +181,7 @@ export async function findPerson(
   let person: Entity | null = null;
   if (nameOrId.startsWith("entity:")) {
     const rows = await query<Entity>(
-      `SELECT * FROM type::thing($id);`,
+      `SELECT * FROM type::record($id);`,
       { id: nameOrId },
     );
     person = rows?.[0] ?? null;
@@ -202,7 +202,7 @@ export async function findPerson(
 
   // Find all linked contacts (has_identity edges)
   const contacts = await query<Entity>(
-    `SELECT out.* FROM relates WHERE in = type::thing($id) AND type = "has_identity";`,
+    `SELECT out.* FROM relates WHERE in = type::record($id) AND type = "has_identity";`,
     { id: String(person.id) },
   ) ?? [];
 
@@ -230,7 +230,7 @@ export async function findPersonContext(
   const memories: Array<{ id: string; content: string; type: string }> = [];
   for (const entityId of allIds) {
     const related = await query<{ id: string; content: string; type: string }>(
-      `SELECT in.id, in.content, type FROM relates WHERE out = type::thing($id) AND in.id CONTAINS "memory:";`,
+      `SELECT in.id, in.content, type FROM relates WHERE out = type::record($id) AND in.id CONTAINS "memory:";`,
       { id: entityId },
     );
     if (related) memories.push(...related);

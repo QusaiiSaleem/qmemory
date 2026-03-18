@@ -65,7 +65,7 @@ export async function correctMemory(
 
   // --- Fetch the existing memory so we can copy its metadata ---
   const rows = await query<Memory>(
-    `SELECT * FROM type::thing($memoryId) WHERE is_active = true LIMIT 1;`,
+    `SELECT * FROM type::record($memoryId) WHERE is_active = true LIMIT 1;`,
     { memoryId: memory_id },
   );
 
@@ -78,7 +78,7 @@ export async function correctMemory(
   // --- Delete: just soft-delete ---
   if (action === "delete") {
     await query(
-      `UPDATE type::thing($memoryId) SET is_active = false, updated_at = time::now();`,
+      `UPDATE type::record($memoryId) SET is_active = false, updated_at = time::now();`,
       { memoryId: memory_id },
     );
     logger.info(`Correct: soft-deleted memory ${memory_id}`);
@@ -114,7 +114,7 @@ export async function correctMemory(
 
     updates.push("updated_at = time::now()");
     await query(
-      `UPDATE type::thing($memoryId) SET ${updates.join(", ")};`,
+      `UPDATE type::record($memoryId) SET ${updates.join(", ")};`,
       updateParams,
     );
     logger.info(`Correct: updated ${memory_id} fields: ${updates.join(", ")}`);
@@ -128,7 +128,7 @@ export async function correctMemory(
       return { ok: false };
     }
     await query(
-      `DELETE type::thing($edgeId);`,
+      `DELETE type::record($edgeId);`,
       { edgeId: params.edge_id },
     );
     logger.info(`Correct: deleted edge ${params.edge_id}`);
@@ -143,14 +143,14 @@ export async function correctMemory(
 
   // Soft-delete the old memory
   await query(
-    `UPDATE type::thing($memoryId) SET is_active = false, updated_at = time::now();`,
+    `UPDATE type::record($memoryId) SET is_active = false, updated_at = time::now();`,
     { memoryId: memory_id },
   );
 
   // Create the corrected version, keeping old category and salience
   const newId = generateId("memory:");
   await query(
-    `CREATE type::thing($newId) CONTENT {
+    `CREATE type::record($newId) CONTENT {
       content: $newContent,
       category: $category,
       salience: $salience,
@@ -158,7 +158,7 @@ export async function correctMemory(
       is_active: true,
       confidence: 0.9,
       source_type: "conversation",
-      prev_version: type::thing($prevVersion),
+      prev_version: type::record($prevVersion),
       created_at: time::now(),
       updated_at: time::now()
     };`,
@@ -174,7 +174,7 @@ export async function correctMemory(
 
   // Create the prev_version edge
   await query(
-    `RELATE type::thing($newId)->prev_version->type::thing($oldId);`,
+    `RELATE type::record($newId)->prev_version->type::record($oldId);`,
     { newId, oldId: memory_id },
   );
 

@@ -88,7 +88,7 @@ export function findRelatedMemories(memoryId: string): PreparedQuery {
       SELECT
         <-relates<-memory AS inbound,
         ->relates->memory AS outbound
-      FROM type::thing($memoryId);
+      FROM type::record($memoryId);
     `,
     params: { memoryId },
   };

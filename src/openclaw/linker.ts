@@ -267,7 +267,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
             for (const sourceId of insight.based_on ?? []) {
               if (!validIds.includes(sourceId)) continue;
               await query(
-                `RELATE type::thing($from) -> relates -> type::thing($to) CONTENT {
+                `RELATE type::record($from) -> relates -> type::record($to) CONTENT {
                   type: "synthesized_from",
                   reason: "Insight derived during reflection",
                   confidence: 0.7,

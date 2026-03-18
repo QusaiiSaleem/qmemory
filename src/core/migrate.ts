@@ -308,7 +308,7 @@ async function discoverRelationships(
   if (memoryIds.length < 2) return 0;
 
   // Fetch the memories we just created
-  const idList = memoryIds.map(id => `type::thing("${id}")`).join(", ");
+  const idList = memoryIds.map(id => `type::record("${id}")`).join(", ");
   const memories = await query<{ id: string; content: string }>(
     `SELECT id, content FROM memory WHERE id IN [${idList}] AND is_active = true;`,
   );
