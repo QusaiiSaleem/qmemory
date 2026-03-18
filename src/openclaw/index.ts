@@ -29,15 +29,57 @@ import { DEFAULT_CONFIG } from "../config.js";
 
 export type SubagentRunner = (task: string) => Promise<string>;
 
+let subagentCounter = 0;
+
 function createSubagentRunner(api: any): SubagentRunner {
   return async (task: string): Promise<string> => {
-    const result = await api.runtime.subagent.run({
-      task,
-      label: "qmemory",
-      runTimeoutSeconds: 15,
-      cleanup: "delete",
-    });
-    return result?.text ?? "";
+    // Generate a unique session key for this subagent run
+    const sessionKey = `qmemory:subagent:${Date.now()}-${++subagentCounter}`;
+
+    try {
+      // 1. Start the subagent run
+      const { runId } = await api.runtime.subagent.run({
+        sessionKey,
+        message: task,
+        lane: "subagent",
+      });
+
+      // 2. Wait for it to complete (15s timeout)
+      const waitResult = await api.runtime.subagent.waitForRun({
+        runId,
+        timeoutMs: 15000,
+      });
+
+      if (waitResult.status !== "ok") {
+        return "";
+      }
+
+      // 3. Read the assistant's response
+      const { messages } = await api.runtime.subagent.getSessionMessages({
+        sessionKey,
+        limit: 10,
+      });
+
+      // Extract text from the last assistant message
+      const assistantMsgs = messages.filter(
+        (m: any) => m.role === "assistant",
+      );
+      const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+      const text = lastMsg?.content
+        ?.filter((c: any) => c.type === "text")
+        ?.map((c: any) => c.text)
+        ?.join("") ?? "";
+
+      // 4. Cleanup
+      await api.runtime.subagent.deleteSession({
+        sessionKey,
+        deleteTranscript: true,
+      }).catch(() => {});
+
+      return text;
+    } catch (error) {
+      return "";
+    }
   };
 }
 
