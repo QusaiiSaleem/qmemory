@@ -302,6 +302,91 @@ export default function register(api: any): void {
     { name: "qmemory_import" },
   );
 
+  // Tool 6: qmemory_person — create/find a person with linked identities
+  api.registerTool(
+    {
+      name: "qmemory_person",
+      description:
+        "Create or find a person with multiple linked identities (WhatsApp, email, " +
+        "Telegram, Smartsheet, etc). A person can have many contacts — each linked " +
+        "via 'has_identity'. Use to build a contact graph that connects people to " +
+        "their messages, tasks, emails, and decisions across all systems.\n\n" +
+        "Examples:\n" +
+        "- Create: qmemory_person({ name: 'Ahmed', contacts: [{source: 'whatsapp', id: '966501234567'}, {source: 'gmail', id: 'ahmed@example.com'}] })\n" +
+        "- Find: qmemory_person({ name: 'Ahmed', action: 'find' })",
+      parameters: Type.Object({
+        name: Type.String({ description: "Person's name" }),
+        action: Type.Optional(
+          Type.String({
+            description: '"create" (default) or "find" — find returns person + all contacts + linked memories',
+          }),
+        ),
+        aliases: Type.Optional(
+          Type.Array(Type.String(), { description: "Alternative names (Arabic, nicknames)" }),
+        ),
+        contacts: Type.Optional(
+          Type.Array(
+            Type.Object({
+              source: Type.String({
+                description:
+                  "System: whatsapp, telegram, hey, gmail, apple-reminders, " +
+                  "calendar, smartsheet, railway, linkedin, github, slack, discord",
+              }),
+              id: Type.String({
+                description: "ID in that system: phone number, email, username, user ID",
+              }),
+              url: Type.Optional(Type.String({ description: "Direct URL (optional)" })),
+              label: Type.Optional(Type.String({ description: 'Display label: "Work email"' })),
+            }),
+            { description: "Contact identities to link" },
+          ),
+        ),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: Record<string, unknown>,
+      ) => {
+        const { createPerson, findPersonContext, setPersonLogger } = await import("../core/person.js");
+        setPersonLogger(logger);
+
+        const action = (params.action as string) || "create";
+
+        if (action === "find") {
+          const result = await findPersonContext(params.name as string);
+          if (!result.person) {
+            return { content: [{ type: "text", text: `Person "${params.name}" not found` }] };
+          }
+          const summary = [
+            `Person: ${result.person.name} (${String(result.person.id)})`,
+            `Aliases: ${result.person.aliases?.join(", ") || "none"}`,
+            `\nContacts (${result.contacts.length}):`,
+            ...result.contacts.map(c =>
+              `  - ${c.external_source}: ${c.external_id} ${c.external_url ? `(${c.external_url})` : ""}`
+            ),
+            `\nLinked memories (${result.memories.length}):`,
+            ...result.memories.slice(0, 10).map(m => `  - [${m.type}] ${m.content}`),
+          ].join("\n");
+          return { content: [{ type: "text", text: summary }] };
+        }
+
+        const result = await createPerson({
+          name: params.name as string,
+          aliases: params.aliases as string[] | undefined,
+          contacts: params.contacts as Array<{
+            source: string; id: string; url?: string; label?: string;
+          }> | undefined,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: `Person: ${result.person_id}\nContacts linked: ${result.contact_ids.length}\nNew links: ${result.links_created}`,
+          }],
+        };
+      },
+    },
+    { name: "qmemory_person" },
+  );
+
   // ----- SERVICE: Background Linker -----
 
   const linkerService = createLinkerService(config, logger, subagentRunner);

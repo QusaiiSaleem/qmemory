@@ -107,18 +107,41 @@ export interface Memory {
 }
 
 export interface Entity {
-  id: string;               // entity:xxx
+  id: string;                // entity:xxx
   name: string;
-  type: string;             // Internal: "person", "project", "org", "concept", "system"
-                            // External: "email", "task", "event", "document", "smartsheet", "deployment"
-  aliases: string[];        // Alternative names
-  external_id?: string;     // Reference ID: "hey:12345", "reminder:ABC", "smartsheet:row:789"
-  external_url?: string;    // Direct URL: "https://app.hey.com/..."
-  external_source?: string; // Source system: "hey", "apple-reminders", "smartsheet", "railway", "calendar"
+  type: string;              // Core: "person", "project", "org", "concept", "system", "topic"
+                             // Contact: "contact" (linked to person via has_identity)
+                             // External: "email", "task", "event", "document", "smartsheet", "deployment"
+  aliases: string[];         // Alternative names
+  external_id?: string;      // Reference ID: "966501234567", "ahmed@example.com", "user:789"
+  external_url?: string;     // Direct URL: "https://wa.me/966501234567"
+  external_source?: string;  // Source: "whatsapp", "telegram", "hey", "gmail", "smartsheet", etc.
+  external_channel?: string; // Channel-specific ID: phone number, username, email address
   embedding?: number[];
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * Well-known external sources for contacts.
+ * Used as values for entity.external_source when type = "contact".
+ */
+export const CONTACT_SOURCES = [
+  "whatsapp",
+  "telegram",
+  "hey",
+  "gmail",
+  "apple-reminders",
+  "calendar",
+  "smartsheet",
+  "railway",
+  "linkedin",
+  "github",
+  "slack",
+  "discord",
+] as const;
+
+export type ContactSource = typeof CONTACT_SOURCES[number];
 
 // ---------------------------------------------------------------------------
 // Edge types

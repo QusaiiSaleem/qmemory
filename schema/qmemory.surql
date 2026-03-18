@@ -81,24 +81,38 @@ DEFINE INDEX idx_memory_scope     ON memory FIELDS scope;
 
 -- ============================================================
 -- NODE: entity
--- People, projects, orgs, concepts, systems
+-- People, projects, orgs, concepts, systems, contacts
+--
+-- MULTI-IDENTITY PATTERN:
+-- A person entity links to multiple contact entities via `relates`:
+--   entity:ahmed (type: "person")
+--     → relates → entity:ahmed_wa (type: "contact") has_identity
+--     → relates → entity:ahmed_email (type: "contact") has_identity
+--     → relates → entity:ahmed_ss (type: "contact") has_identity
+--
+-- Entity types:
+--   Core:     person, project, org, concept, system, topic
+--   Contact:  contact (linked to a person via has_identity)
+--   External: email, task, event, document, smartsheet, deployment, url
 -- ============================================================
 
 DEFINE TABLE entity SCHEMAFULL;
-DEFINE FIELD name         ON entity TYPE string;
-DEFINE FIELD type         ON entity TYPE string;
--- Entity types: person, project, org, concept, system
--- External types: email, task, event, document, smartsheet, deployment, url
-DEFINE FIELD aliases      ON entity TYPE array<string>  DEFAULT [];
-DEFINE FIELD external_id  ON entity TYPE option<string>;
--- External reference ID: "hey:12345", "reminder:ABC", "smartsheet:row:789"
-DEFINE FIELD external_url ON entity TYPE option<string>;
--- Direct URL: "https://app.hey.com/...", "https://app.smartsheet.com/..."
-DEFINE FIELD external_source ON entity TYPE option<string>;
--- Source system: "hey", "apple-reminders", "smartsheet", "railway", "calendar"
-DEFINE FIELD embedding    ON entity TYPE option<array<float>>;
-DEFINE FIELD created_at   ON entity TYPE datetime       DEFAULT time::now();
-DEFINE FIELD updated_at   ON entity TYPE datetime       DEFAULT time::now();
+DEFINE FIELD name             ON entity TYPE string;
+DEFINE FIELD type             ON entity TYPE string;
+DEFINE FIELD aliases          ON entity TYPE array<string>  DEFAULT [];
+-- Contact/external fields (used when type = "contact" or external types)
+DEFINE FIELD external_id      ON entity TYPE option<string>;
+-- Reference ID: "966501234567", "ahmed@example.com", "user:789"
+DEFINE FIELD external_url     ON entity TYPE option<string>;
+-- Direct URL: "https://wa.me/966501234567"
+DEFINE FIELD external_source  ON entity TYPE option<string>;
+-- Source system: "whatsapp", "telegram", "hey", "gmail", "apple-reminders",
+-- "calendar", "smartsheet", "railway", "linkedin", "github"
+DEFINE FIELD external_channel ON entity TYPE option<string>;
+-- Channel-specific ID: WhatsApp phone, Telegram username, email address
+DEFINE FIELD embedding        ON entity TYPE option<array<float>>;
+DEFINE FIELD created_at       ON entity TYPE datetime       DEFAULT time::now();
+DEFINE FIELD updated_at       ON entity TYPE datetime       DEFAULT time::now();
 
 DEFINE INDEX idx_entity_name ON entity FIELDS name;
 DEFINE INDEX idx_entity_type ON entity FIELDS type;
