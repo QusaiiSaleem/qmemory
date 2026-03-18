@@ -1,321 +1,285 @@
-# Qmemory — Agent Skill Guide
+# Qmemory — Agent Guide
+## From Flat Files to Graph Memory
 
-> Add this to your agent's SOUL.md or system prompt so it knows how to use Qmemory effectively.
+_A guide for any OpenClaw agent installing Qmemory for the first time._
 
-## What You Have
+---
 
-You have **cross-session graph memory** powered by Qmemory. This means:
-- You remember facts from ALL past conversations, across all topics, channels, and sessions
-- You can create relationships between any two things (people, decisions, projects, emails)
-- Your memory gets smarter over time — a background process finds connections you missed
-- You never truly forget — deleted facts are soft-deleted with an audit trail
+## What is Qmemory?
 
-## Your Memory Tools
+Qmemory is a **graph memory layer** for AI agents. Instead of flat text files where facts get lost, you build a **network of connected knowledge** — people, projects, decisions, tools, and the relationships between them.
 
-### `qmemory_save` — Save an important fact
-**When to use**: User shares a decision, preference, fact, correction, or plan.
-```
-qmemory_save({
-  content: "Budget approved at 500K SAR",
-  category: "decision",      // style|preference|context|decision|idea|feedback|domain
-  salience: 0.8,             // 0.0=trivial, 0.5=normal, 0.8=important, 1.0=critical
-  scope: "project:myproject"  // global|project:xxx|topic:xxx
-})
-```
+Think of it this way:
+- **Flat files** = a pile of sticky notes
+- **Graph memory** = a mind map where everything is connected
 
-**DO save**: Decisions, preferences, corrections, facts about people/projects, plans, deadlines.
-**DON'T save**: Greetings, acknowledgments, things you already saved, trivial exchanges.
+When you search for "Project X," you don't just get a paragraph — you get the people working on it, the decisions made, the tools used, and how it connects to everything else.
 
-### `qmemory_search` — Recall past knowledge
-**When to use**: You need context from a previous conversation, or the user asks "do you remember...?"
-```
-qmemory_search({
-  query: "budget",                          // Full-text search
-  categories: ["decision", "context"],      // Optional filter
-  scope: "project:myproject",               // Optional scope filter
-  limit: 10
-})
-```
+---
 
-### `qmemory_link` — Connect two things
-**When to use**: You notice a relationship between entities, decisions, or events.
-```
-qmemory_link({
-  from_id: "memory:budget500k",
-  to_id: "entity:team_lead",
-  type: "approved_by",           // ANY relationship type you want
-  reason: "Team lead approved the budget via email"
-})
-```
+## The 6 Tools
 
-**Relationship types are FREEFORM** — use whatever fits:
-supports, contradicts, blocks, depends_on, caused_by, manages, reports_to,
-approved_by, monitors, inspired_by, follows, references, triggers, updates
-
-### `qmemory_correct` — Fix, update, or delete
-**When to use**: User says something is wrong, wants to change importance, expire a fact, or remove a link.
-
-4 actions:
-```
-// Fix content (creates version chain — old version preserved)
-qmemory_correct({ memory_id: "memory:xxx", action: "correct", new_content: "Actually 600K not 500K" })
-
-// Change metadata without new version
-qmemory_correct({ memory_id: "memory:xxx", action: "update", salience: 1.0 })
-qmemory_correct({ memory_id: "memory:xxx", action: "update", valid_until: "2026-06-01T00:00:00Z" })
-qmemory_correct({ memory_id: "memory:xxx", action: "update", scope: "global" })
-
-// Soft-delete (never truly lost)
-qmemory_correct({ memory_id: "memory:xxx", action: "delete" })
-
-// Remove a relationship
-qmemory_correct({ memory_id: "memory:xxx", action: "unlink", edge_id: "relates:xxx" })
-```
-
-### `qmemory_import` — Import a file into memory
-**When to use**: User wants to import old memory files or any markdown into the graph.
-```
-qmemory_import({ file_path: "/path/to/file.md" })
-```
-
-## When to Save (Decision Guide)
+### 1. `qmemory_search` — Your Starting Point
+Search by meaning, category, or scope before answering any question about past work.
 
 ```
-User says something → Ask yourself:
-
-"Would this be useful in a FUTURE conversation?"
-  │
-  ├── YES → "Is it already saved?"
-  │         ├── YES → SKIP (dedup handles it, but don't waste a call)
-  │         └── NO → SAVE IT
-  │
-  └── NO → DON'T SAVE
+qmemory_search(query: "project planning", categories: ["decision"], scope: "project:myapp")
 ```
 
-### Salience Guide
+**When:** Before every response about people, projects, decisions, tools, or past context. This is not optional.
 
-| Salience | When to Use | Examples |
-|----------|-------------|---------|
-| **0.3** | Nice to know, not critical | "User mentioned they like coffee" |
-| **0.5** | Normal fact | "Project started in January" |
-| **0.7** | Important | "Budget is 500K", "Client meeting on Thursday" |
-| **0.8** | Very important | "User prefers Arabic-first", "Deploy only on weekdays" |
-| **1.0** | Critical rule | "NEVER deploy on Fridays", "Always ask before external actions" |
-
-### Category Guide
-
-| Category | What Goes Here |
-|----------|---------------|
-| `style` | How the user likes to communicate ("formal Arabic", "brief responses") |
-| `preference` | What the user prefers ("3 indicators per level", "#NoBuild philosophy") |
-| `context` | Facts about the world ("Budget is 500K", "Railway on us-east-1") |
-| `decision` | Choices made ("Chose SurrealDB over PostgreSQL") |
-| `idea` | Future plans ("Expand to second branch next quarter") |
-| `feedback` | Corrections ("Actually 600K not 500K") |
-| `domain` | Professional knowledge ("Saudi regulatory bodies: 9 total") |
-
-## When to Link (Relationship Guide)
-
-Create relationships when you notice:
-- **Cause/effect**: "This deployment caused that incident" → type: `caused_by`
-- **Approval chain**: "Manager approved the budget" → type: `approved_by`
-- **Dependencies**: "Hiring depends on budget approval" → type: `depends_on`
-- **Contradictions**: "New info contradicts old fact" → type: `contradicts`
-- **Support**: "This evidence supports that decision" → type: `supports`
-- **People/roles**: "Alice manages Project X" → type: `manages`
-- **External references**: "This was discussed in an email" → type: `referenced_in`
-
-## When to Correct (User Feedback Guide)
-
-Listen for these signals:
-- "That's wrong" / "في الحقيقة" → `action: "correct"`
-- "That's not important anymore" → `action: "update", salience: 0.2`
-- "That was only true last month" → `action: "update", valid_until: "2026-02-28"`
-- "Forget that" / "Delete it" → `action: "delete"`
-- "Those two aren't related" → `action: "unlink"`
-- "Make that more important" / "That's critical" → `action: "update", salience: 1.0`
-
-## People & Contact Graph
-
-Use `qmemory_person` to create people with multiple linked identities:
+### 2. `qmemory_save` — Store a Fact
+Save one clear statement with category, scope, and importance.
 
 ```
-qmemory_person({
-  name: "Ahmed",
-  aliases: ["أحمد"],
+qmemory_save(
+  content: "Switched from REST to GraphQL for the API — faster mobile performance",
+  category: "decision",
+  scope: "project:myapp",
+  salience: 0.7
+)
+```
+
+**When:** A new decision is made, a person is mentioned, a lesson is learned, or a tool/workflow changes.
+
+**Categories:** `style`, `preference`, `context`, `decision`, `idea`, `feedback`, `domain`
+
+**Scopes:** `global`, `project:<name>`, `topic:<name>`
+
+**Salience guide:**
+| Type | Salience |
+|------|----------|
+| Critical rule / behavioral decision | 0.8–0.9 |
+| Key person / major project | 0.7–0.8 |
+| Project context / tool info | 0.5–0.6 |
+| Historical / reference | 0.3–0.4 |
+
+### 3. `qmemory_link` — Connect Two Things
+Create a relationship between any two nodes. The type is **freeform** — use whatever describes the relationship best.
+
+```
+qmemory_link(
+  from_id: "entity:p123",
+  to_id: "memory:456",
+  type: "leads",
+  reason: "Sarah leads the frontend redesign project"
+)
+```
+
+**Common link types:** `works_at`, `leads`, `reports_to`, `decided_on`, `supersedes`, `feeds_into`, `client_of`, `enables`, `tests`, `blocks`, `depends_on`, `member_of`, `tool_for`, `belongs_to_topic`
+
+**Rule:** Every new fact should link to at least one existing node. No orphans.
+
+### 4. `qmemory_correct` — Fix, Update, or Delete
+```
+qmemory_correct(memory_id: "memory:123", action: "correct", new_content: "Updated fact")
+qmemory_correct(memory_id: "memory:456", action: "delete")
+qmemory_correct(memory_id: "memory:789", action: "update", salience: 0.9)
+```
+
+**When:** Information changed, expired, or was wrong.
+
+### 5. `qmemory_person` — People Are First-Class
+Create people with linked identities across platforms.
+
+```
+qmemory_person(
+  name: "Sarah",
+  aliases: ["Sarah K", "SK"],
   contacts: [
-    { source: "whatsapp", id: "966501234567" },
-    { source: "gmail", id: "ahmed@company.com" },
-    { source: "smartsheet", id: "user:12345" }
+    { source: "slack", id: "sarah.k" },
+    { source: "gmail", id: "sarah@company.com" }
   ]
-})
+)
 ```
 
-Find everything about a person (all contacts + all linked memories):
-```
-qmemory_person({ name: "Ahmed", action: "find" })
-```
+**When:** Any new person is mentioned. Always link them to their project/team/role afterward.
 
-## Relationship Chains — The Power Feature
-
-You can chain relationships to build **workflow maps**. Any node connects to any node.
-
-**Example: A conversation creates a task, assigned to a person, sent via email**
+### 6. `qmemory_import` — Bulk Import
+Import an entire markdown file — AI extracts facts, saves with dedup, and creates relationships.
 
 ```
-Step 1: User says "Ahmed needs the Q2 report by Thursday"
-
-Step 2: You build the chain:
-
-  qmemory_save({
-    content: "Ahmed needs Q2 report by Thursday",
-    category: "context", salience: 0.8
-  })
-
-  qmemory_person({
-    name: "Ahmed",
-    contacts: [{ source: "gmail", id: "ahmed@company.com" }]
-  })
-
-  qmemory_link({
-    from_id: "memory:q2report",
-    to_id: "entity:ahmed",
-    type: "assigned_to",
-    reason: "Ahmed is responsible for receiving the Q2 report"
-  })
-
-Step 3: The graph now shows:
-
-  Session (Topic 9)
-    │ has_message
-    ▼
-  Message: "Ahmed needs the Q2 report by Thursday"
-    │ extracted_from
-    ▼
-  Memory: "Ahmed needs Q2 report by Thursday" (salience: 0.8)
-    │ relates (assigned_to)
-    ▼
-  Entity: "Ahmed" (person)
-    │ has_identity
-    ├──▶ Contact: whatsapp 966501234567
-    └──▶ Contact: gmail ahmed@company.com
+qmemory_import(file_path: "/path/to/memory-file.md")
 ```
 
-**Later, when you search for "Ahmed" in ANY topic, you find:**
-- The memory (Q2 report deadline)
-- His contacts (how to reach him)
-- The session where this was discussed
-- Any other memories linked to him
+**When:** Migrating old memory files. But read the Migration Strategy below first — manual is smarter.
 
-### More Chain Examples
+---
 
-**Decision → Approval → Person → Email:**
+## Migration Strategy: Flat Files → Graph
+
+You have old `memory/*.md` files full of context. Here's how to migrate them **intelligently**, not just dump them.
+
+### Why Manual > Auto-Import
+
+`qmemory_import` works, but it treats every line equally. Manual migration lets you:
+- **Filter** — skip noise, keep signal
+- **Categorize** — assign the right category and salience
+- **Link** — connect facts to each other as you go
+- **Deduplicate** — catch overlapping info across files
+
+### The Process
+
+#### Step 1: Read Files Chronologically (Oldest → Newest)
+Start from the oldest file. This builds context naturally — early decisions explain later ones.
+
+#### Step 2: For Each File, Extract Only What Matters
+
+Ask yourself:
+- **People:** Who is mentioned? What's their role? Who do they work with?
+- **Decisions:** What was decided? What did it replace? What project does it affect?
+- **Tools/Systems:** What was set up? What endpoint/config? What skill uses it?
+- **Lessons:** What went wrong? What was learned? What rule was created?
+- **Context:** What project state changed? What milestone was hit?
+
+Skip:
+- Routine logs ("updated OpenClaw" with no impact)
+- Temporary states ("downloading file...")
+- Already-superseded info (unless the decision chain matters)
+
+#### Step 3: Save with Structure
+
+For each extracted fact:
+1. `qmemory_save` with clear content, correct category, appropriate scope and salience
+2. `qmemory_person` for any new person (with aliases if they have multiple names)
+3. `qmemory_link` to connect it to existing nodes
+
+#### Step 4: Build the Relationship Web
+
+After each file, ask:
+- Are there **people** who should be linked to **projects**?
+- Are there **decisions** that **replaced** older decisions?
+- Are there **tools** that **serve** specific **topics/channels**?
+- Are there **projects** that **depend on** or **feed into** each other?
+
+The goal: when you search for anything, you find its full context through connections.
+
+#### Step 5: After All Files — Gap Analysis
+
+Once migration is complete, search the graph and ask:
+- Are any people **orphaned** (no links to projects/topics)?
+- Are any projects **isolated** (no links to tools/people)?
+- Are any decisions **floating** (not connected to what they affect)?
+- Are any tools/skills **unlinked** (not connected to the topic/channel they serve)?
+
+Fill every gap with a link.
+
+---
+
+## How to Think About Links
+
+Links are the **power** of graph memory. A fact without links is just a better sticky note.
+
+### The Link Checklist
+
+Every time you save something new, run through this:
+
+| New thing | Link it to... | Link type |
+|-----------|---------------|-----------|
+| Person | Their project/team | `works_at`, `leads`, `member_of` |
+| Person | Other people | `reports_to`, `works_with`, `client_of` |
+| Decision | What it replaced | `supersedes`, `replaced` |
+| Decision | What project it affects | `decided_on`, `affects` |
+| Tool/Skill | The topic/channel it serves | `belongs_to_topic`, `tool_for` |
+| Tool/Skill | Other tools it works with | `enables`, `feeds_into`, `complements` |
+| Project | Parent project/org | `project_under`, `part_of` |
+| Project | People working on it | (via person links) |
+| Bug/Issue | System it affects | `tests`, `blocks`, `found_in` |
+| Lesson/Feedback | What caused it | `lesson_from`, `caused_by` |
+
+### Dynamic Link Types
+
+Don't limit yourself to a fixed vocabulary. Create link types that **read like English/Arabic**:
+
+- `freed_focus_for` — "canceling X freed focus for Y"
+- `training_case` — "this client is a training case for the sales framework"
+- `travel_for` — "this trip was for working on project X"
+- `shaped_by` — "my behavior was shaped by this feedback"
+
+The best link type is the one that makes the relationship **instantly clear** when you read it later.
+
+---
+
+## Daily Habits
+
+### Every Session Start
+1. `qmemory_search` for the current topic before responding
+2. Check if people/projects mentioned exist in the graph
+
+### During Conversation
+3. New person mentioned → `qmemory_person` + link immediately
+4. Decision made → `qmemory_save` (decision) + link to what it affects
+5. Lesson learned → `qmemory_save` (feedback) + link to what caused it
+
+### End of Session
+6. Review what was discussed — anything worth saving that you missed?
+7. Write daily log to `memory/YYYY-MM-DD.md` (flat file backup)
+
+### The Golden Rule
+> **Every session should leave the graph smarter than before.** Any new information that isn't stored and linked is a lost opportunity.
+
+---
+
+## Common Patterns
+
+### Pattern 1: Topic/Channel Routing
+If your agent sends messages to different channels/topics, store the routing map in the graph:
+- Save each topic/channel as a memory
+- Link skills, people, and projects to their topic
+- When deciding where to send something → search for its links to topics
+
+### Pattern 2: Decision Chains
+Decisions evolve. Track the chain:
 ```
-memory:"Budget approved at 500K"
-  → relates (approved_by) → entity:manager
-  → relates (communicated_via) → entity:approval_email (type: email)
+Decision A (old) ←—superseded_by—— Decision B (current)
+                                         |
+                                    affects → Project X
 ```
+When someone asks "why do we do X?" — traverse the chain.
 
-**Incident → Cause → System → Deployment:**
+### Pattern 3: People Networks
+People don't exist in isolation:
 ```
-memory:"Production down for 2 hours"
-  → relates (caused_by) → memory:"Friday deploy broke auth"
-  → relates (affected) → entity:railway_prod (type: system)
+Person A —works_at→ Project X
+Person A —reports_to→ Person B
+Person A —has_agreement_with→ Person C
+Person B —board_member→ Project X
 ```
+When someone asks "who's involved in X?" — one search, full picture.
 
-**Task → Depends On → Decision → Blocks → Hiring:**
+### Pattern 4: Tool → Topic Mapping
+Map every skill/tool to its delivery channel:
 ```
-entity:hire_developer (type: task)
-  → relates (depends_on) → memory:"Budget approved"
-  → relates (blocks) → memory:"Need 2 more developers for Q3"
+Skill: stock-screener —reported_in_topic→ 📈 Portfolio
+Skill: prayer-tracker —delivered_in_topic→ 🌿 Habits
+Skill: server-monitor —reported_in_topic→ 🖥️ Servers
 ```
+When a cron runs, you know where to send results without thinking.
 
-**Meeting → Person → Project → Deadline:**
-```
-entity:kickoff_meeting (type: event, external_source: calendar)
-  → relates (attended_by) → entity:ahmed
-  → relates (about) → entity:project_x
-  → relates (has_deadline) → memory:"Project X due June 1"
-```
+---
 
-### Relationship Types You Can Use
+## Anti-Patterns (Don't Do This)
 
-These are NOT fixed — use ANY word that fits. Common ones:
+❌ **Saving everything** — Not every line is worth a node. Be selective.
+❌ **Orphan nodes** — A fact with no links is almost useless. Always link.
+❌ **Vague content** — "Meeting happened" tells you nothing. "Decided to switch to GraphQL for mobile performance" is searchable.
+❌ **Duplicate saves** — Qmemory has auto-dedup, but write clear, distinct facts.
+❌ **Ignoring salience** — A behavioral rule (0.9) and a historical note (0.3) are not equal. Score them honestly.
+❌ **Fixed link types only** — The power is in freeform types. Don't force everything into `relates_to`.
 
-| Type | When to Use |
-|------|------------|
-| `assigned_to` | Task belongs to person |
-| `approved_by` | Decision approved by someone |
-| `caused_by` | Incident caused by action |
-| `depends_on` | X requires Y first |
-| `blocks` | X prevents Y |
-| `has_identity` | Person's contact info (auto-created by qmemory_person) |
-| `communicated_via` | Sent/discussed through channel |
-| `attended_by` | Meeting/event attendee |
-| `managed_by` | Project/team management |
-| `reports_to` | Org hierarchy |
-| `monitors` | Session/system watches something |
-| `follows` | Chronological sequence |
-| `contradicts` | New fact conflicts with old |
-| `supports` | Evidence supports decision |
-| `references` | Links to external document |
-| `solved_using` | Problem solved with tool/skill |
+---
 
-## External References
+## Quick Reference
 
-When conversation mentions external things, the extraction process creates entities:
-- **Emails**: type `email`, external_source `hey` or `gmail`
-- **Tasks**: type `task`, external_source `apple-reminders`
-- **Events**: type `event`, external_source `calendar`
-- **Sheets**: type `smartsheet`, external_source `smartsheet`
-- **Deployments**: type `deployment`, external_source `railway`
-- **People**: type `person` with linked contacts via `qmemory_person`
+| I need to... | Tool | Example |
+|--------------|------|---------|
+| Recall past context | `qmemory_search` | Before any answer about history |
+| Store a new fact | `qmemory_save` | Decision, person info, tool config |
+| Connect two things | `qmemory_link` | Person → Project, Tool → Topic |
+| Add a person | `qmemory_person` | New name mentioned in conversation |
+| Fix wrong info | `qmemory_correct` | Changed city, expired plan |
+| Import a file | `qmemory_import` | Old memory markdown files |
 
-You don't need to create these manually — they're extracted automatically after each turn.
-But you CAN link memories to them: `qmemory_link({ from: "memory:xxx", to: "entity:xxx", type: "referenced_in" })`
+---
 
-## Migration — Import Old Memories
-
-Import existing memory files into the graph:
-
-```
-// Import a single file
-qmemory_import({ file_path: "~/.openclaw/workspace/MEMORY.md" })
-
-// Import daily memory files
-qmemory_import({ file_path: "~/.openclaw/workspace/memory/2026-03-14.md" })
-```
-
-The import process:
-1. Reads the file
-2. Extracts facts using AI (or simple line-by-line without AI)
-3. Saves each fact with dedup (won't duplicate existing memories)
-4. Creates chronological links between files
-5. Returns: X facts extracted, Y new memories created
-
-## What Happens in the Background
-
-You don't need to do any of this — it happens automatically:
-
-1. **After every turn**: Facts are extracted from the conversation and saved (with dedup)
-2. **Every 5 minutes**: The linker scans for unlinked memories and creates relationships
-3. **Every 30 minutes**: The reflect process synthesizes insights and resolves contradictions
-4. **Before compaction**: Critical facts are extracted before old messages are dropped
-5. **After compaction**: High-salience memories (>= 0.8) are re-injected so you don't forget rules
-
-## System Prompt Injection
-
-At the start of every conversation, you receive recalled memories in your system prompt:
-
-```
-## Cross-Session Memory (Qmemory)
-_5 memories recalled, sorted by importance_
-
-- [decision!] Budget approved at 500K by team lead
-- [preference!] User prefers Arabic-first, technical terms in English
-- [context] Railway deployment on us-east-1
-- [feedback] Actually 600K not 500K ← contradicts previous
-- [idea] Expand to second branch next quarter
-```
-
-These come from ALL sessions — not just the current topic. You have full cross-session awareness.
+_The goal isn't a bigger database. It's a smarter one. Every node connected, every relationship named, every session building on the last._
