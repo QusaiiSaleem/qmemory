@@ -54,16 +54,35 @@ export function searchMemoriesBM25(
 ): PreparedQuery {
   return {
     surql: `
-      SELECT * FROM memory
-      WHERE content @@ $query
+      SELECT *, search::score(1) AS bm25_score FROM memory
+      WHERE content @1@ $query
         AND is_active = true
         AND ($scope = "any" OR scope = $scope)
         AND salience >= $minSalience
         AND (valid_until IS NONE OR valid_until > time::now())
-      ORDER BY salience DESC
+      ORDER BY bm25_score DESC, salience DESC
       LIMIT $limit;
     `,
     params: { query, scope, minSalience, limit },
+  };
+}
+
+/** Vector similarity search on memory embeddings */
+export function searchMemoriesVector(
+  queryEmbedding: number[],
+  limit: number,
+): PreparedQuery {
+  return {
+    surql: `
+      SELECT *, vector::similarity::cosine(embedding, $queryEmbedding) AS vec_score
+      FROM memory
+      WHERE is_active = true
+        AND embedding IS NOT NONE
+        AND (valid_until IS NONE OR valid_until > time::now())
+      ORDER BY vec_score DESC
+      LIMIT $limit
+    `,
+    params: { queryEmbedding, limit },
   };
 }
 

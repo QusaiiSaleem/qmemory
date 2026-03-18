@@ -211,6 +211,15 @@ export function createEngine(
         return { bootstrapped: false };
       }
 
+      // Enable vector index if embedding provider is available
+      if (embeddingConfig.provider !== "none") {
+        try {
+          await enableVectorIndex(embeddingConfig.dimension);
+        } catch {
+          // Non-fatal — vector search degrades gracefully
+        }
+      }
+
       // Parse session key to extract topic/group/channel automatically
       // OpenClaw sends: "agent:main:telegram:group:-1003655876469:topic:7"
       const sessionKey = params.sessionKey ?? params.sessionId;
@@ -536,6 +545,7 @@ export function createEngine(
               source_type: "conversation",
             },
             subagentRunner,
+            embeddingConfig,
           );
           savedCount++;
         } catch (error) {
@@ -650,6 +660,7 @@ export function createEngine(
             { content: fact.content, category: fact.category,
               salience: fact.salience, scope: fact.scope, source_type: "conversation" },
             subagentRunner,
+            embeddingConfig,
           );
         }
         if (facts.length > 0) {

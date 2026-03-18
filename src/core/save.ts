@@ -16,6 +16,8 @@
 import { query, generateId } from "../db/client.js";
 import { searchMemoriesBM25 } from "../db/queries.js";
 import { dedup } from "./dedup.js";
+import { generateEmbedding } from "./embeddings.js";
+import type { EmbeddingConfig } from "./embeddings.js";
 import { consoleLogger } from "../config.js";
 import type {
   Memory,
@@ -67,6 +69,7 @@ export interface SaveResult {
 export async function saveMemory(
   params: SaveParams,
   subagentRunner?: SubagentRunner,
+  embeddingConfig?: EmbeddingConfig,
 ): Promise<SaveResult> {
   const {
     content,
@@ -138,6 +141,20 @@ export async function saveMemory(
     );
 
     logger.info(`Save: UPDATE — created ${newId} replacing ${decision.target_id}`);
+
+    // Generate embedding for updated memory
+    if (embeddingConfig && embeddingConfig.provider !== "none") {
+      try {
+        const embedding = await generateEmbedding(content, embeddingConfig);
+        if (embedding) {
+          await query(
+            `UPDATE type::record($id) SET embedding = $embedding`,
+            { id: newId, embedding },
+          );
+        }
+      } catch { /* non-fatal */ }
+    }
+
     return { action: "UPDATE", memory_id: newId };
   }
 
@@ -166,5 +183,22 @@ export async function saveMemory(
   );
 
   logger.info(`Save: ADD — created new memory ${newId}`);
+
+  // Generate and store embedding (non-blocking — don't fail the save)
+  if (embeddingConfig && embeddingConfig.provider !== "none") {
+    try {
+      const embedding = await generateEmbedding(content, embeddingConfig);
+      if (embedding) {
+        await query(
+          `UPDATE type::record($id) SET embedding = $embedding`,
+          { id: newId, embedding },
+        );
+        logger.debug(`Save: embedding stored for ${newId} (${embedding.length}d)`);
+      }
+    } catch (e) {
+      logger.debug(`Save: embedding failed (non-fatal): ${e}`);
+    }
+  }
+
   return { action: "ADD", memory_id: newId };
 }

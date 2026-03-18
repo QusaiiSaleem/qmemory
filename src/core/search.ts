@@ -10,7 +10,9 @@
  */
 
 import { query } from "../db/client.js";
-import { searchMemoriesBM25, getMemoriesForScope } from "../db/queries.js";
+import { searchMemoriesBM25, searchMemoriesVector, getMemoriesForScope } from "../db/queries.js";
+import { generateEmbedding } from "./embeddings.js";
+import type { EmbeddingConfig } from "./embeddings.js";
 import { consoleLogger } from "../config.js";
 import type {
   RecalledMemory,
@@ -42,6 +44,7 @@ export function setSearchLogger(l: QmemoryLogger): void {
  */
 export async function searchMemories(
   options: RecallOptions,
+  embeddingConfig?: EmbeddingConfig,
 ): Promise<RecalledMemory[]> {
   const {
     query: searchQuery,
@@ -63,6 +66,26 @@ export async function searchMemories(
 
     results = rows ?? [];
     logger.debug(`Search: BM25 returned ${results.length} results`);
+
+    // Vector search augmentation — find semantically similar even if words differ
+    if (embeddingConfig && embeddingConfig.provider !== "none") {
+      try {
+        const queryEmbedding = await generateEmbedding(searchQuery, embeddingConfig);
+        if (queryEmbedding) {
+          const vecQ = searchMemoriesVector(queryEmbedding, limit);
+          const vecRows = await query<RecalledMemory>(vecQ.surql, vecQ.params);
+          if (vecRows && vecRows.length > 0) {
+            // Merge: add vector results not already in BM25 results
+            const existingIds = new Set(results.map((r) => String(r.id)));
+            const newVec = vecRows.filter((r) => !existingIds.has(String(r.id)));
+            results.push(...newVec);
+            logger.debug(`Search: vector added ${newVec.length} new results`);
+          }
+        }
+      } catch (e) {
+        logger.debug(`Search: vector search failed (non-fatal): ${e}`);
+      }
+    }
   } else {
     // --- No query string: fall back to scope + salience filter ---
     logger.debug(`Search: scope filter scope=${scope} minSalience=${min_salience}`);

@@ -16,6 +16,7 @@ import { searchMemories } from "../core/search.js";
 import { saveMemory } from "../core/save.js";
 import { correctMemory } from "../core/correct.js";
 import { linkNodes } from "../core/link.js";
+import { resolveEmbeddingConfig, setEmbeddingLogger } from "../core/embeddings.js";
 import type {
   QmemoryConfig,
   QmemoryLogger,
@@ -106,6 +107,10 @@ export default function register(api: any): void {
 
   // 4. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
   const openclawConfig = api.config as Record<string, unknown> | undefined;
+
+  // 4b. Resolve embedding config (used by save tool for vector generation)
+  setEmbeddingLogger(logger);
+  const embeddingConfig = resolveEmbeddingConfig(config, openclawConfig);
 
   // 5. Pre-flight: check SurrealDB health (non-blocking)
   (async () => {
@@ -241,6 +246,7 @@ export default function register(api: any): void {
             scope: (params.scope as string) ?? "global",
           },
           subagentRunner,
+          embeddingConfig,
         );
         return {
           content: [
