@@ -30,6 +30,14 @@ openclaw plugins list | grep qmemory           # Verify loaded
 # After code changes:
 npm run build && pkill -f openclaw && sleep 2 && openclaw gateway start
 
+# Clear jiti cache if gateway doesn't pick up new code:
+rm -rf /var/folders/*/T/jiti && pkill -9 -f openclaw && openclaw gateway start
+
+# Release (auto-publishes to npm via GitHub Actions):
+npm version patch  # or minor/major
+git push origin main
+gh release create v$(node -p "require('./package.json').version") --generate-notes
+
 # Debugging
 openclaw logs --follow | grep qmemory          # Plugin logs
 surreal sql -e http://localhost:8000 -u root -p root --namespace qmemory --database main
@@ -120,6 +128,11 @@ Entities can reference external systems (email, tasks, Smartsheet):
 
 ## Gotchas
 
+- **Jiti caches compiled plugins** — if gateway doesn't pick up code changes after rebuild, clear `/var/folders/*/T/jiti` and restart
+- **SurrealDB 3.0: NULL vs NONE** — optional fields (`option<string>`) reject `NULL` from JS SDK. Omit the field entirely instead of passing `null`/`undefined`
+- **SurrealDB 3.0: `type::record()` not `type::thing()`** — `type::thing()` was removed in v3. Use `type::record("table", $id)` for parameterized record IDs
+- **SurrealDB 3.0: `search::score()` returns 0** — BM25 matching via `@@` works but scoring is broken. Vector search (cosine) handles relevance ranking
+- **Subagent API (OpenClaw)** — `api.runtime.subagent.run()` requires `{ sessionKey, message, idempotencyKey }`, returns `{ runId }`. Must then `waitForRun()` + `getSessionMessages()` + `deleteSession()`. The wrapper in `createSubagentRunner()` handles this
 - **`tools.alsoAllow: ["group:plugins"]` MUST be in openclaw.json** — the `coding` profile filters out ALL plugin tools via `applyToolPolicyPipeline`. Without this, tools register silently but the agent never sees them
 - **AgentTool interface requires `label` field** on every tool (e.g., `label: "Qmemory Search"`)
 - **`openclaw plugins inspect` does not exist** — use `openclaw plugins list` instead
