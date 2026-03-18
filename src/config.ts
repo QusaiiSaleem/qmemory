@@ -271,10 +271,22 @@ export function fitToTokenBudget(
   maxTokens: number,
 ): RecalledMemory[] {
   const result: RecalledMemory[] = [];
+  const seen = new Set<string>(); // Dedup by content similarity
   let tokens = 0;
 
   for (const mem of memories) {
-    const memTokens = estimateTokens(mem.content) + 20; // overhead per line
+    // Skip noise: very short, headers, file sizes, dates-only
+    if (mem.content.length < 15) continue;
+    if (/^\d{4}-\d{2}-\d{2}/.test(mem.content) && mem.content.length < 30) continue;
+    if (/^\d+(\.\d+)?[KMG]?B?\s*[→←]/.test(mem.content)) continue;
+
+    // Dedup: skip if we already have very similar content
+    const normalized = mem.content.toLowerCase().replace(/\s+/g, " ").trim();
+    const shortKey = normalized.slice(0, 60);
+    if (seen.has(shortKey)) continue;
+    seen.add(shortKey);
+
+    const memTokens = estimateTokens(mem.content) + 20;
     if (tokens + memTokens > maxTokens) break;
     result.push(mem);
     tokens += memTokens;
@@ -285,7 +297,11 @@ export function fitToTokenBudget(
 
 /** Format recalled memories as markdown for system prompt injection */
 /**
- * Format memories for system prompt injection.
+ * Format memories as a structured graph map for system prompt injection.
+ *
+ * Instead of a flat list, groups memories by category and shows
+ * relationships — giving the agent a navigable world view.
+ *
  * @param includeToolsGuide - true on first message of session, false after
  */
 export function formatMemories(
@@ -294,27 +310,48 @@ export function formatMemories(
 ): string {
   if (memories.length === 0 && !includeToolsGuide) return "";
 
-  const lines = memories.map((m) => {
-    const parts = [`[${m.category}`];
-    if (m.salience >= 0.8) parts.push("!");
-    parts.push(`] ${m.content}`);
-    if (m.valid_until) parts.push(` (expires: ${m.valid_until})`);
-    return `- ${parts.join("")}`;
-  });
+  // Group memories by category
+  const groups: Record<string, RecalledMemory[]> = {};
+  for (const m of memories) {
+    const cat = m.category || "context";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(m);
+  }
 
-  const sections = [
-    "## Cross-Session Memory (Qmemory)",
-    `_${memories.length} memories recalled, sorted by importance_`,
-    "",
-    ...lines,
+  // Category display order and labels
+  const categoryOrder: Array<{ key: MemoryCategory; label: string }> = [
+    { key: "decision", label: "Decisions & Rules" },
+    { key: "preference", label: "Preferences" },
+    { key: "style", label: "Communication Style" },
+    { key: "feedback", label: "Corrections" },
+    { key: "context", label: "Key Facts" },
+    { key: "idea", label: "Plans & Ideas" },
+    { key: "domain", label: "Domain Knowledge" },
   ];
 
-  // Tools guide only on first message — saves tokens on subsequent turns
+  const sections: string[] = [
+    "## Cross-Session Memory (Qmemory)",
+    `_${memories.length} memories from all sessions_`,
+  ];
+
+  for (const { key, label } of categoryOrder) {
+    const items = groups[key];
+    if (!items || items.length === 0) continue;
+
+    sections.push("", `### ${label}`);
+    for (const m of items) {
+      const marker = m.salience >= 0.8 ? "!" : "";
+      const expiry = m.valid_until ? ` (expires: ${m.valid_until})` : "";
+      sections.push(`- ${marker}${m.content}${expiry}`);
+    }
+  }
+
+  // Tools guide only on first message
   if (includeToolsGuide) {
     sections.push(
       "",
-      "### Memory Tools (available this session)",
-      "- `qmemory_save` — Save important facts, decisions, corrections (auto-dedup)",
+      "### Memory Tools",
+      "- `qmemory_save` — Save facts/decisions/corrections (auto-dedup)",
       "- `qmemory_search` — Deep search by meaning, category, or scope",
       "- `qmemory_link` — Create relationships between any two things",
       "- `qmemory_correct` — Fix, update, delete, or unlink",
