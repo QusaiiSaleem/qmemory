@@ -83,7 +83,7 @@ export async function linkNodes(params: LinkParams): Promise<LinkResult> {
   // --- Create the relates edge ---
   const edgeId = generateId("relates:");
   await query(
-    `RELATE type::record($fromId)->relates->type::record($toId) CONTENT {
+    `RELATE $fromId->relates->$toId CONTENT {
       type: $relType,
       reason: $reason,
       confidence: 0.8,

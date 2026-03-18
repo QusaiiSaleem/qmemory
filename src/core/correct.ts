@@ -174,7 +174,7 @@ export async function correctMemory(
 
   // Create the prev_version edge
   await query(
-    `RELATE type::record($newId)->prev_version->type::record($oldId);`,
+    `RELATE $newId->prev_version->$oldId;`,
     { newId, oldId: memory_id },
   );
 
