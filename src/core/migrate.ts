@@ -103,7 +103,6 @@ export async function migrateWorkspaceMemories(
       }
 
       // Link memories from this file to memories from the previous file
-      // (chronological chain: older → newer = "preceded_by")
       if (previousMemoryIds.length > 0 && newMemoryIds.length > 0) {
         try {
           await linkNodes({
@@ -117,6 +116,15 @@ export async function migrateWorkspaceMemories(
         } catch {
           // Non-critical — skip
         }
+      }
+
+      // Ask subagent to find relationships BETWEEN memories from this file
+      if (subagentRunner && newMemoryIds.length >= 2) {
+        const newRelationships = await discoverRelationships(
+          newMemoryIds,
+          subagentRunner,
+        );
+        result.relationships_created += newRelationships;
       }
 
       previousMemoryIds = newMemoryIds;
@@ -282,4 +290,94 @@ function guessCategory(text: string): ExtractedFact["category"] {
   if (lower.includes("actually") || lower.includes("correct") || lower.includes("في الحقيقة")) return "feedback";
   if (lower.includes("style") || lower.includes("أسلوب")) return "style";
   return "context";
+}
+
+// ---------------------------------------------------------------------------
+// Post-import relationship discovery
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask subagent to find relationships between imported memories.
+ * Runs AFTER facts are saved, so we can link them immediately
+ * instead of waiting for the background linker (5 min).
+ */
+async function discoverRelationships(
+  memoryIds: string[],
+  subagentRunner: SubagentRunner,
+): Promise<number> {
+  if (memoryIds.length < 2) return 0;
+
+  // Fetch the memories we just created
+  const idList = memoryIds.map(id => `type::thing("${id}")`).join(", ");
+  const memories = await query<{ id: string; content: string }>(
+    `SELECT id, content FROM memory WHERE id IN [${idList}] AND is_active = true;`,
+  );
+
+  if (!memories || memories.length < 2) return 0;
+
+  const prompt = `You are analyzing memories that were just imported from a file.
+Find relationships between them.
+
+MEMORIES:
+${memories.map(m => `[${m.id}] ${m.content}`).join("\n")}
+
+For each relationship you find, return a JSON array:
+[
+  {
+    "from_id": "memory:xxx",
+    "to_id": "memory:yyy",
+    "type": "supports|contradicts|elaborates|depends_on|caused_by|follows|blocks",
+    "reason": "Brief explanation"
+  }
+]
+
+Rules:
+- Only create relationships that are clearly justified
+- Use any relationship type that fits (not limited to the examples above)
+- If a newer fact contradicts an older one, use "contradicts"
+- If a fact adds detail to another, use "elaborates"
+- If no relationships exist, return: []
+
+Return JSON only:`;
+
+  try {
+    const response = await subagentRunner(prompt);
+    const cleaned = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return 0;
+
+    const relationships = JSON.parse(jsonMatch[0]) as Array<{
+      from_id: string;
+      to_id: string;
+      type: string;
+      reason?: string;
+    }>;
+
+    let created = 0;
+    for (const rel of relationships) {
+      // Validate both IDs exist in our set
+      if (!memoryIds.includes(rel.from_id) && !memoryIds.includes(rel.to_id)) continue;
+
+      try {
+        await linkNodes({
+          from_id: rel.from_id,
+          to_id: rel.to_id,
+          type: rel.type,
+          reason: rel.reason,
+          created_by: "compact",
+        });
+        created++;
+      } catch {
+        // Skip invalid links
+      }
+    }
+
+    if (created > 0) {
+      logger.info(`Import: discovered ${created} relationships between imported memories`);
+    }
+    return created;
+  } catch (error) {
+    logger.warn(`Import relationship discovery failed: ${error}`);
+    return 0;
+  }
 }
