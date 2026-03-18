@@ -153,10 +153,9 @@ export function getRecentMemories(limit: number): PreparedQuery {
  * Returns entities + their connections + orphan count + stats.
  * This is the "world map" the agent sees at session start.
  */
-export function getGraphSummary(): PreparedQuery {
+export function getGraphEntities(): PreparedQuery {
   return {
     surql: `
-      -- 1. All entities with their relationship counts
       SELECT
         id, name, type, aliases, external_source, external_id,
         count(->relates) AS outgoing,
@@ -164,33 +163,34 @@ export function getGraphSummary(): PreparedQuery {
         count(->relates) + count(<-relates) AS total_links
       FROM entity
       ORDER BY total_links DESC
-      LIMIT 30;
+      LIMIT 30
+    `,
+    params: {},
+  };
+}
 
-      -- 2. All relationship edges (up to 100)
+export function getGraphEdges(): PreparedQuery {
+  return {
+    surql: `
       SELECT
-        in AS from,
-        out AS to,
+        in AS from_node,
+        out AS to_node,
         type,
         reason,
         created_by,
         created_at
       FROM relates
       ORDER BY created_at DESC
-      LIMIT 100;
+      LIMIT 100
+    `,
+    params: {},
+  };
+}
 
-      -- 3. Orphan memories (no relationships — need linking)
-      SELECT count() AS count FROM memory
-      WHERE is_active = true
-        AND count(->relates) = 0
-        AND count(<-relates) = 0
-      GROUP ALL;
-
-      -- 4. Total stats
-      SELECT
-        (SELECT count() FROM memory WHERE is_active = true GROUP ALL)[0].count AS memories,
-        (SELECT count() FROM entity GROUP ALL)[0].count AS entities,
-        (SELECT count() FROM relates GROUP ALL)[0].count AS edges,
-        (SELECT count() FROM session GROUP ALL)[0].count AS sessions;
+export function getGraphStats(): PreparedQuery {
+  return {
+    surql: `
+      SELECT count() AS total FROM memory WHERE is_active = true GROUP ALL
     `,
     params: {},
   };

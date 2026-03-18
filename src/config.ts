@@ -379,8 +379,8 @@ export interface GraphEntity {
 }
 
 export interface GraphEdge {
-  from: string;
-  to: string;
+  from_node: string;
+  to_node: string;
   type: string;
   reason?: string;
 }
@@ -436,10 +436,10 @@ export function formatGraphMap(
     for (const e of items.slice(0, 10)) {
       // Find relationships for this entity
       const rels = edges.filter(
-        (r) => String(r.from) === String(e.id) || String(r.to) === String(e.id),
+        (r) => String(r.from_node) === String(e.id) || String(r.to_node) === String(e.id),
       );
       const relStr = rels.slice(0, 3).map((r) => {
-        const other = String(r.from) === String(e.id) ? String(r.to) : String(r.from);
+        const other = String(r.from_node) === String(e.id) ? String(r.to_node) : String(r.from_node);
         // Extract just the name part from record ID
         const otherName = other.split(":").slice(1).join(":");
         return `${r.type} → ${otherName}`;

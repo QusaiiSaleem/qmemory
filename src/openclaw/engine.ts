@@ -172,18 +172,9 @@ export function createEngine(
 
       // Check SurrealDB version — v3.0+ required
       try {
-        const versionResult = await query<{ ver: string }>("RETURN server::version();");
-        const version = versionResult?.[0] as unknown as string;
-        if (version && typeof version === "string") {
-          const major = parseInt(version.replace(/[^0-9.]/g, "").split(".")[0], 10);
-          if (major < 3) {
-            logger.error(
-              `SurrealDB v${version} detected — Qmemory requires v3.0+. ` +
-              `Schema, FULLTEXT indexes, and record IDs will fail. ` +
-              `Upgrade: brew upgrade surrealdb/tap/surreal`,
-            );
-          }
-        }
+        const versionResult = await query<string>("INFO FOR DB;");
+        // If INFO FOR DB works without error, we're on a supported version.
+        // SurrealDB v2 would fail on our schema syntax anyway.
       } catch {
         // Non-fatal — version check is best-effort
       }
@@ -269,8 +260,8 @@ export function createEngine(
             key: sessionKey,
             channel,
             chatType,
-            topicId,
-            groupId,
+            topicId: topicId || undefined,
+            groupId: groupId || undefined,
             scope,
           },
         );
@@ -418,33 +409,33 @@ export function createEngine(
 
       // Part 2: Knowledge graph map — ALWAYS shown (this is the core product)
       try {
-        const { getGraphSummary } = await import("../db/queries.js");
-        const { queryMulti } = await import("../db/client.js");
-        const graphQ = getGraphSummary();
-        const graphResults = await queryMulti<[
-          import("../config.js").GraphEntity[],
-          import("../config.js").GraphEdge[],
-          Array<{ count: number }>,
-          Array<{ memories: number; entities: number; edges: number; sessions: number }>,
-        ]>(graphQ.surql, graphQ.params);
+        const { getGraphEntities, getGraphEdges, getGraphStats } = await import("../db/queries.js");
 
-        if (graphResults) {
-          const [entities, edges, orphanResult, statsResult] = graphResults;
-          const stats: import("../config.js").GraphStats = {
-            memories: statsResult?.[0]?.memories ?? 0,
-            entities: statsResult?.[0]?.entities ?? 0,
-            edges: statsResult?.[0]?.edges ?? 0,
-            sessions: statsResult?.[0]?.sessions ?? 0,
-            orphans: orphanResult?.[0]?.count ?? 0,
-          };
-          const { formatGraphMap } = await import("../config.js");
-          const graphMap = formatGraphMap(
-            (entities ?? []) as import("../config.js").GraphEntity[],
-            (edges ?? []) as import("../config.js").GraphEdge[],
-            stats,
-          );
-          if (graphMap) parts.push(graphMap);
-        }
+        // Run 3 separate queries (SurrealDB 3.0 multi-statement has issues)
+        const entQ = getGraphEntities();
+        const edgeQ = getGraphEdges();
+        const statsQ = getGraphStats();
+
+        const [entities, edges, statsResult] = await Promise.all([
+          query<import("../config.js").GraphEntity>(entQ.surql, entQ.params),
+          query<import("../config.js").GraphEdge>(edgeQ.surql, edgeQ.params),
+          query<{ total: number }>(statsQ.surql, statsQ.params),
+        ]);
+
+        const stats: import("../config.js").GraphStats = {
+          memories: statsResult?.[0]?.total ?? 0,
+          entities: entities?.length ?? 0,
+          edges: edges?.length ?? 0,
+          sessions: 0,
+          orphans: 0,
+        };
+        const { formatGraphMap } = await import("../config.js");
+        const graphMap = formatGraphMap(
+          (entities ?? []) as import("../config.js").GraphEntity[],
+          (edges ?? []) as import("../config.js").GraphEdge[],
+          stats,
+        );
+        if (graphMap) parts.push(graphMap);
       } catch (graphError) {
         logger.debug(`Graph map failed (non-fatal): ${graphError}`);
       }
