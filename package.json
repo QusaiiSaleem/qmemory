@@ -10,8 +10,16 @@
   "openclaw": {
     "extensions": ["./dist/openclaw/index.js"]
   },
+  "files": [
+    "dist/",
+    "schema/",
+    "openclaw.plugin.json",
+    "SKILL.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "dev": "npx fastmcp dev src/mcp/server.ts",
     "inspect": "npx fastmcp inspect src/mcp/server.ts",
     "start": "tsx src/cli.ts",
