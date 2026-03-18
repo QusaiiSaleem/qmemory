@@ -30,6 +30,7 @@
 - [Installation](#-installation)
 - [Configuration](#%EF%B8%8F-configuration)
 - [Tools Reference](#-tools-reference)
+- [Graph Viewer UI](#%EF%B8%8F-graph-viewer-ui)
 - [Agent Memory Management](#-agent-memory-management)
 - [For AI Agents — SKILL.md](#-for-ai-agents--skillmd)
 - [Graph Schema](#-graph-schema)
@@ -644,6 +645,29 @@ qmemory_import({ file_path: "~/.openclaw/workspace/memory/2026-03-14.md" })
 ```
 
 **Returns:** `Imported: 12 facts extracted, 9 new memories created`
+
+---
+
+## 🖥️ Graph Viewer UI
+
+Qmemory includes an interactive graph visualization that shows your entire memory network — every fact, entity, and relationship as a live, explorable graph.
+
+**Access it at:** `http://localhost:<gateway-port>/qmemory/graph`
+
+For the default OpenClaw setup: **http://127.0.0.1:18789/qmemory/graph**
+
+The viewer shows:
+- **Memory nodes** — facts with salience coloring (brighter = more important)
+- **Entity nodes** — people, projects, systems
+- **Relationship edges** — typed connections (supports, manages, blocks, etc.)
+- **Filters** — filter by category, scope, or date range
+
+**API endpoint:** `GET /qmemory/api/graph` returns JSON `{ nodes, edges }` with optional query params:
+- `?category=context` — filter by memory category
+- `?scope=global` — filter by scope
+- `?from=2026-01-01&to=2026-03-18` — filter by date range
+
+> No authentication needed on localhost. The graph viewer is read-only.
 
 ---
 

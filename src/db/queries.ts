@@ -160,9 +160,10 @@ export function getGraphSummary(): PreparedQuery {
       SELECT
         id, name, type, aliases, external_source, external_id,
         count(->relates) AS outgoing,
-        count(<-relates) AS incoming
+        count(<-relates) AS incoming,
+        count(->relates) + count(<-relates) AS total_links
       FROM entity
-      ORDER BY (outgoing + incoming) DESC
+      ORDER BY total_links DESC
       LIMIT 30;
 
       -- 2. All relationship edges (up to 100)
@@ -171,7 +172,8 @@ export function getGraphSummary(): PreparedQuery {
         out AS to,
         type,
         reason,
-        created_by
+        created_by,
+        created_at
       FROM relates
       ORDER BY created_at DESC
       LIMIT 100;

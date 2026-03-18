@@ -443,8 +443,23 @@ export default function register(api: any): void {
   // ----- HTTP ROUTE: Graph Viewer -----
 
   api.registerHttpRoute({
-    path: "/qmemory/graph",
-    description: "Interactive graph viewer for Qmemory",
+    path: "/qmemory",
+    auth: "plugin",
+    match: "prefix",
+    handler: async (req: any, res: any) => {
+      const { handleGraphRequest } = await import("../ui/graph-handler.js");
+      const host = req.headers.host ?? "localhost";
+      const protocol = req.headers["x-forwarded-proto"] ?? "http";
+      const url = new URL(req.url ?? "/", `${protocol}://${host}`);
+      const handled = await handleGraphRequest(url, (status, headers, body) => {
+        res.writeHead(status, headers);
+        res.end(body);
+      });
+      if (!handled) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
+      }
+    },
   });
 
   logger.info("Qmemory plugin loaded (context engine + 6 tools + linker + graph route)");

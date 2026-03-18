@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/ui/graph.html dist/ui/graph.html",
     "prepublishOnly": "npm run build",
     "dev": "npx fastmcp dev src/mcp/server.ts",
     "inspect": "npx fastmcp inspect src/mcp/server.ts",

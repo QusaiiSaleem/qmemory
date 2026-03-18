@@ -16,7 +16,8 @@
  */
 
 import { readFileSync } from "fs";
-import { query } from "../db/client.js";
+import { query, getDb, connect } from "../db/client.js";
+import { DEFAULT_CONFIG } from "../config.js";
 import type { Memory, Entity, Session, Relates } from "../config.js";
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,11 @@ export async function buildGraphData(filters: {
   from?: string;
   to?: string;
 }): Promise<GraphResponse> {
+  // Ensure DB connection exists (graph handler may be loaded in a separate context)
+  if (!getDb()) {
+    await connect(DEFAULT_CONFIG);
+  }
+
   // Build WHERE clauses for memories
   const conditions: string[] = ["is_active = true"];
   const params: Record<string, unknown> = {};

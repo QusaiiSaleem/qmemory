@@ -233,9 +233,10 @@ export function createEngine(
         );
         logger.debug(`Loaded existing session: ${currentSessionId}`);
       } else {
-        currentSessionId = `session:${generateId("s")}`;
+        const sessionIdPart = generateId("s");
+        currentSessionId = `session:${sessionIdPart}`;
         await query(
-          `CREATE $id CONTENT {
+          `CREATE type::record("session", $idPart) CONTENT {
             session_key: $key,
             channel: $channel,
             chat_type: $chatType,
@@ -246,7 +247,7 @@ export function createEngine(
             created_at: time::now()
           }`,
           {
-            id: currentSessionId,
+            idPart: sessionIdPart,
             key: sessionKey,
             channel,
             chatType,

@@ -90,6 +90,13 @@ Schema file: `schema/qmemory.surql`
 | `compact()` | Extract memories from old messages → graph nodes (not throwaway summaries) |
 | `afterTurn()` | Pre-compaction flush at 70% + background fact extraction |
 
+## Graph Viewer UI
+
+Interactive visualization of the memory graph at `http://localhost:<gateway-port>/qmemory/graph`.
+Shows all memories (nodes), entities, sessions, and relationship edges (relates).
+API endpoint at `/qmemory/api/graph` returns JSON (`{ nodes, edges }`), supports filters: `?category=&scope=&from=&to=`.
+Auth: `plugin` mode (no token needed on localhost).
+
 ## Background Services
 
 - **Linker** (every 5 min): finds unlinked memories, asks subagent for relationships, creates `relates` edges
