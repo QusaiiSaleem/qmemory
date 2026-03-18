@@ -156,6 +156,13 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 - `linker_interval_ms: 300000` — linker runs every 5 minutes
 - `reflect_interval_ms: 1800000` — reflect runs every 30 minutes
 
+## Publishing
+
+- **npm:** published as `qmemory` — auto-publishes via GitHub Actions on Release
+- **Community plugin:** PR submitted to `openclaw/openclaw` docs (PR #49959)
+- **Never store npm tokens locally** — GitHub Actions uses `NPM_TOKEN` secret
+- **To release:** `npm version patch && git push && gh release create v$(node -p "require('./package.json').version") --generate-notes`
+
 ## Dependencies
 
 Only 3 runtime deps: `surrealdb` (official JS SDK) + `fastmcp` (MCP server framework) + `@sinclair/typebox` (OpenClaw tool schemas)
