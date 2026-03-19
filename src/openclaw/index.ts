@@ -112,32 +112,8 @@ export default function register(api: any): void {
   setEmbeddingLogger(logger);
   const embeddingConfig = resolveEmbeddingConfig(config, openclawConfig);
 
-  // 5. Pre-flight: check SurrealDB health (non-blocking)
-  (async () => {
-    try {
-      const { connect, isHealthy } = await import("../db/client.js");
-      const db = await connect(config);
-      if (db) {
-        const healthy = await isHealthy();
-        if (healthy) {
-          logger.info(`SurrealDB connected: ${config.surrealdb_url}`);
-        } else {
-          logger.warn(
-            `SurrealDB at ${config.surrealdb_url} is not responding. ` +
-            `Run: surreal start --user root --pass root file:~/.qmemory/data.db`
-          );
-        }
-      } else {
-        logger.warn(
-          `Cannot connect to SurrealDB at ${config.surrealdb_url}. ` +
-          `Qmemory will run in degraded mode (no memory persistence). ` +
-          `To fix: bash /path/to/Qmemory/scripts/setup-surrealdb-launchagent.sh`
-        );
-      }
-    } catch {
-      // Non-fatal — bootstrap() will retry
-    }
-  })();
+  // 5. SurrealDB connection is handled by bootstrap() in engine.ts
+  //    (removed pre-flight IIFE that caused a duplicate connection race condition)
 
   // 6. Check tools.alsoAllow config — warn if plugin tools will be hidden
   const toolsConfig = (openclawConfig as any)?.tools;
