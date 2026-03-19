@@ -62,23 +62,35 @@ server.addTool({
       .optional()
       .describe("Max results (default 10)"),
   }),
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  timeoutMs: 10000,
   execute: async (args) => {
-    const results = await searchMemories({
-      query: args.query,
-      categories: args.categories as MemoryCategory[] | undefined,
-      scope: args.scope,
-      limit: args.limit ?? 10,
-    });
+    try {
+      const results = await searchMemories({
+        query: args.query,
+        categories: args.categories as MemoryCategory[] | undefined,
+        scope: args.scope,
+        limit: args.limit ?? 10,
+      });
 
-    if (results.length === 0) return "No memories found.";
+      if (results.length === 0) return "No memories found.";
 
-    // Format: [id] [category, salience:X] content
-    return results
-      .map(
-        (m) =>
-          `[${m.id}] [${m.category}, salience:${m.salience}] ${m.content}`,
-      )
-      .join("\n");
+      return results
+        .map(
+          (m) =>
+            `[${m.id}] [${m.category}, salience:${m.salience}] ${m.content}`,
+        )
+        .join("\n");
+    } catch (error) {
+      throw new UserError(
+        error instanceof Error ? error.message : "Search failed.",
+      );
+    }
   },
 });
 
@@ -114,21 +126,32 @@ server.addTool({
       .optional()
       .describe("Scope: global, project:xxx, topic:xxx (default global)"),
   }),
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+  timeoutMs: 15000,
   execute: async (args) => {
-    // Delegate to core save function (includes rule-based dedup)
-    // Note: no subagentRunner in MCP mode — uses rule-based fallback
-    const result = await saveMemory({
-      content: args.content,
-      category: args.category,
-      salience: args.salience,
-      scope: args.scope,
-    });
+    try {
+      const result = await saveMemory({
+        content: args.content,
+        category: args.category,
+        salience: args.salience,
+        scope: args.scope,
+      });
 
-    if (result.action === "NOOP") {
-      return `Already known — existing memory: ${result.memory_id}`;
+      if (result.action === "NOOP") {
+        return `Already known — existing memory: ${result.memory_id}`;
+      }
+
+      return `${result.action}: ${result.memory_id} [${args.category}, salience:${args.salience ?? 0.5}]`;
+    } catch (error) {
+      throw new UserError(
+        error instanceof Error ? error.message : "Save failed.",
+      );
     }
-
-    return `${result.action}: ${result.memory_id} [${args.category}, salience:${args.salience ?? 0.5}]`;
   },
 });
 
@@ -152,13 +175,18 @@ server.addTool({
       .optional()
       .describe("New content (required when action is 'correct')"),
   }),
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+  timeoutMs: 10000,
   execute: async (args) => {
-    // Validate: correct requires new_content
     if (args.action === "correct" && !args.new_content) {
       throw new UserError("new_content is required when action is 'correct'.");
     }
 
-    // Delegate to core correct function
     const result = await correctMemory({
       memory_id: args.memory_id,
       action: args.action,
@@ -204,9 +232,15 @@ server.addTool({
       .optional()
       .describe("Why this relationship exists"),
   }),
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  timeoutMs: 10000,
   execute: async (args) => {
     try {
-      // Delegate to core link function (validates both nodes exist)
       const result = await linkNodes({
         from_id: args.from_id,
         to_id: args.to_id,
@@ -217,7 +251,6 @@ server.addTool({
 
       return `Linked: ${args.from_id} —[${args.type}]→ ${args.to_id} (${result.edge_id})`;
     } catch (error) {
-      // linkNodes throws if a node doesn't exist
       throw new UserError(
         error instanceof Error ? error.message : "Failed to create link.",
       );

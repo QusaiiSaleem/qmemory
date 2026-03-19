@@ -66,6 +66,7 @@ export async function recall(
     ? optionsOrSessionKey
     : undefined;
   const collected: RecalledMemory[] = [];
+  const targetCount = options.limit ?? 20;
 
   // --- Tier 1: Graph-linked memories ---
   // Traverse 'relates' edges from entities mentioned in the current session
@@ -73,15 +74,15 @@ export async function recall(
   collected.push(...graphMemories);
   logger.debug(`Recall tier 1 (graph): ${graphMemories.length} memories`);
 
-  // --- Tier 2: BM25 full-text search ---
-  if (options.query) {
+  // --- Tier 2: BM25 full-text search (skip if Tier 1 has plenty) ---
+  if (options.query && collected.length < targetCount * 1.5) {
     const searchResults = await searchMemories(options);
     collected.push(...searchResults);
     logger.debug(`Recall tier 2 (BM25): ${searchResults.length} memories`);
   }
 
-  // --- Tier 3: Category filter ---
-  if (options.categories && options.categories.length > 0) {
+  // --- Tier 3: Category filter (skip if already have enough) ---
+  if (options.categories && options.categories.length > 0 && collected.length < targetCount * 1.5) {
     const categoryResults = await searchMemories({
       ...options,
       query: undefined, // No text search — just category filter
@@ -90,11 +91,12 @@ export async function recall(
     logger.debug(`Recall tier 3 (category): ${categoryResults.length} memories`);
   }
 
-  // --- Tier 4: Recent fallback ---
-  // Always include recent memories so the agent has fresh context
-  const recentResults = await fetchRecent();
-  collected.push(...recentResults);
-  logger.debug(`Recall tier 4 (recent): ${recentResults.length} memories`);
+  // --- Tier 4: Recent fallback (skip if already have enough) ---
+  if (collected.length < targetCount) {
+    const recentResults = await fetchRecent();
+    collected.push(...recentResults);
+    logger.debug(`Recall tier 4 (recent): ${recentResults.length} memories`);
+  }
 
   // --- Merge: deduplicate by ID ---
   const deduped = deduplicateById(collected);

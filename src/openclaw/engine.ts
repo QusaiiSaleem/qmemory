@@ -26,20 +26,30 @@ import { recall } from "../core/recall.js";
 import { saveMemory } from "../core/save.js";
 import { extractMemories } from "../core/extract.js";
 import { dedup } from "../core/dedup.js";
+import {
+  getGraphEntities,
+  getGraphEdges,
+  getGraphStats,
+} from "../db/queries.js";
 import type {
   QmemoryConfig,
   QmemoryLogger,
   Memory,
   RecalledMemory,
   ExtractedFact,
+  GraphEntity,
+  GraphEdge,
+  GraphStats,
 } from "../config.js";
 import {
   formatMemories,
+  formatGraphMap,
   fitToTokenBudget,
   estimateTokens,
 } from "../config.js";
-import { resolveEmbeddingConfig, generateEmbedding, enableVectorIndex, setEmbeddingLogger } from "../core/embeddings.js";
+import { enableVectorIndex } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
+import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
 import type { SubagentRunner } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -117,6 +127,16 @@ function parseSessionKey(sessionKey: string): ParsedSessionKey {
 }
 
 // ---------------------------------------------------------------------------
+// Process-level flags — avoid redundant work across sessions
+// ---------------------------------------------------------------------------
+
+let schemaApplied = false;
+let vectorIndexEnabled = false;
+
+// Graph map cache — avoid re-querying every assemble() turn
+const GRAPH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// ---------------------------------------------------------------------------
 // Engine factory — returns the ContextEngine object
 // ---------------------------------------------------------------------------
 
@@ -124,16 +144,17 @@ export function createEngine(
   config: QmemoryConfig,
   logger: QmemoryLogger,
   subagentRunner?: SubagentRunner,
-  openclawConfig?: Record<string, unknown>,
+  _openclawConfig?: Record<string, unknown>,
+  embeddingConfig?: EmbeddingConfig,
 ) {
-  // Resolve embedding config from OpenClaw's existing settings (no extra API key!)
-  setEmbeddingLogger(logger);
-  const embeddingConfig: EmbeddingConfig = resolveEmbeddingConfig(config, openclawConfig);
-
   // Track the current session for this engine instance
   let currentSessionId: string | null = null;
   let currentSessionKey: string | null = null;
   let hasShownToolsGuide = false; // Show tools list only on first assemble per session
+
+  // Graph map cache (per engine instance)
+  let graphMapCache: string | null = null;
+  let graphMapCacheTime: number = 0;
 
   // Set the logger on the DB client so it uses OpenClaw's logger
   setLogger(logger);
@@ -179,11 +200,14 @@ export function createEngine(
         // Non-fatal — version check is best-effort
       }
 
-      // Apply schema (safe to run multiple times)
+      // Apply schema (skipped if already applied this process)
       try {
-        const schemaPath = getSchemaPath();
-        const schemaSurql = await readFile(schemaPath, "utf-8");
-        await applySchema(schemaSurql);
+        if (!schemaApplied) {
+          const schemaPath = getSchemaPath();
+          const schemaSurql = await readFile(schemaPath, "utf-8");
+          await applySchema(schemaSurql);
+          schemaApplied = true;
+        }
 
         // --- AUTO-IMPORT: First run detection ---
         // If 0 memories exist, auto-import old memory files
@@ -193,10 +217,9 @@ export function createEngine(
         if (memCount && memCount.length > 0 && memCount[0].count === 0 && subagentRunner) {
           logger.info("First run detected (0 memories) — auto-importing workspace memory files...");
           try {
-            const { migrateWorkspaceMemories, setMigrateLogger } = await import("../core/migrate.js");
             setMigrateLogger(logger);
             // Detect workspace path from OpenClaw config or default
-            const workspacePath = (openclawConfig as any)?.workspace?.path
+            const workspacePath = (_openclawConfig as any)?.workspace?.path
               ?? join(process.env.HOME ?? "", ".openclaw", "workspace");
             const result = await migrateWorkspaceMemories(workspacePath, subagentRunner!);
             logger.info(
@@ -211,10 +234,11 @@ export function createEngine(
         return { bootstrapped: false };
       }
 
-      // Enable vector index if embedding provider is available
-      if (embeddingConfig.provider !== "none") {
+      // Enable vector index (skipped if already enabled this process)
+      if (!vectorIndexEnabled && embeddingConfig && embeddingConfig.provider !== "none") {
         try {
           await enableVectorIndex(embeddingConfig.dimension);
+          vectorIndexEnabled = true;
         } catch {
           // Non-fatal — vector search degrades gracefully
         }
@@ -425,35 +449,35 @@ export function createEngine(
       const memoriesText = formatMemories(fitted, isFirstAssemble);
       if (memoriesText) parts.push(memoriesText);
 
-      // Part 2: Knowledge graph map — ALWAYS shown (this is the core product)
+      // Part 2: Knowledge graph map — cached with 5-min TTL
       try {
-        const { getGraphEntities, getGraphEdges, getGraphStats } = await import("../db/queries.js");
+        const now = Date.now();
+        if (!graphMapCache || now - graphMapCacheTime > GRAPH_CACHE_TTL_MS) {
+          const entQ = getGraphEntities();
+          const edgeQ = getGraphEdges();
+          const statsQ = getGraphStats();
 
-        // Run 3 separate queries (SurrealDB 3.0 multi-statement has issues)
-        const entQ = getGraphEntities();
-        const edgeQ = getGraphEdges();
-        const statsQ = getGraphStats();
+          const [entities, edges, statsResult] = await Promise.all([
+            query<GraphEntity>(entQ.surql, entQ.params),
+            query<GraphEdge>(edgeQ.surql, edgeQ.params),
+            query<{ total: number }>(statsQ.surql, statsQ.params),
+          ]);
 
-        const [entities, edges, statsResult] = await Promise.all([
-          query<import("../config.js").GraphEntity>(entQ.surql, entQ.params),
-          query<import("../config.js").GraphEdge>(edgeQ.surql, edgeQ.params),
-          query<{ total: number }>(statsQ.surql, statsQ.params),
-        ]);
-
-        const stats: import("../config.js").GraphStats = {
-          memories: statsResult?.[0]?.total ?? 0,
-          entities: entities?.length ?? 0,
-          edges: edges?.length ?? 0,
-          sessions: 0,
-          orphans: 0,
-        };
-        const { formatGraphMap } = await import("../config.js");
-        const graphMap = formatGraphMap(
-          (entities ?? []) as import("../config.js").GraphEntity[],
-          (edges ?? []) as import("../config.js").GraphEdge[],
-          stats,
-        );
-        if (graphMap) parts.push(graphMap);
+          const stats: GraphStats = {
+            memories: statsResult?.[0]?.total ?? 0,
+            entities: entities?.length ?? 0,
+            edges: edges?.length ?? 0,
+            sessions: 0,
+            orphans: 0,
+          };
+          graphMapCache = formatGraphMap(
+            (entities ?? []) as GraphEntity[],
+            (edges ?? []) as GraphEdge[],
+            stats,
+          );
+          graphMapCacheTime = now;
+        }
+        if (graphMapCache) parts.push(graphMapCache);
       } catch (graphError) {
         logger.debug(`Graph map failed (non-fatal): ${graphError}`);
       }
@@ -552,6 +576,9 @@ export function createEngine(
           logger.warn(`Failed to save fact: ${error}`);
         }
       }
+
+      // Invalidate graph cache since new memories were saved
+      if (savedCount > 0) graphMapCache = null;
 
       logger.info(
         `Compaction: extracted ${extractedFacts.length} facts, saved ${savedCount}`,
@@ -664,6 +691,7 @@ export function createEngine(
           );
         }
         if (facts.length > 0) {
+          graphMapCache = null; // Invalidate graph cache
           logger.debug(`afterTurn: extracted ${facts.length} facts`);
         }
       } catch (error) {

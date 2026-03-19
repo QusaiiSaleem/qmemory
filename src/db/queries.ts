@@ -113,7 +113,7 @@ export function findRelatedMemories(memoryId: string): PreparedQuery {
   };
 }
 
-/** Get or create a session by session_key (upsert pattern) */
+/** Get or create a session by session_key using UPSERT (leverages unique index) */
 export function findOrCreateSession(
   sessionKey: string,
   channel: string,
@@ -121,20 +121,14 @@ export function findOrCreateSession(
 ): PreparedQuery {
   return {
     surql: `
-      LET $existing = (SELECT * FROM session WHERE session_key = $sessionKey LIMIT 1);
-      IF array::len($existing) > 0 {
-        UPDATE $existing[0].id SET last_active = time::now();
-        RETURN $existing[0];
-      } ELSE {
-        CREATE session CONTENT {
-          session_key: $sessionKey,
-          channel: $channel,
-          chat_type: $chatType,
-          scope: "global",
-          last_active: time::now(),
-          created_at: time::now()
-        };
-      };
+      UPSERT session SET
+        session_key = $sessionKey,
+        channel = $channel,
+        chat_type = $chatType,
+        scope = "global",
+        last_active = time::now(),
+        created_at = created_at ?? time::now()
+      WHERE session_key = $sessionKey;
     `,
     params: { sessionKey, channel, chatType },
   };

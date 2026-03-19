@@ -17,6 +17,9 @@ import { saveMemory } from "../core/save.js";
 import { correctMemory } from "../core/correct.js";
 import { linkNodes } from "../core/link.js";
 import { resolveEmbeddingConfig, setEmbeddingLogger } from "../core/embeddings.js";
+import { importFile, setMigrateLogger } from "../core/migrate.js";
+import { createPerson, findPersonContext, setPersonLogger } from "../core/person.js";
+import { handleGraphRequest } from "../ui/graph-handler.js";
 import type {
   QmemoryConfig,
   QmemoryLogger,
@@ -130,7 +133,7 @@ export default function register(api: any): void {
   }
 
   // 7. Register the context engine (replaces LCM)
-  const engine = createEngine(config, logger, subagentRunner, openclawConfig);
+  const engine = createEngine(config, logger, subagentRunner, openclawConfig, embeddingConfig);
   api.registerContextEngine("qmemory", () => engine);
 
   logger.info("Context engine registered");
@@ -353,7 +356,6 @@ export default function register(api: any): void {
         _toolCallId: string,
         params: Record<string, unknown>,
       ) => {
-        const { importFile, setMigrateLogger } = await import("../core/migrate.js");
         setMigrateLogger(logger);
         const result = await importFile(
           params.file_path as string,
@@ -417,7 +419,6 @@ export default function register(api: any): void {
         _toolCallId: string,
         params: Record<string, unknown>,
       ) => {
-        const { createPerson, findPersonContext, setPersonLogger } = await import("../core/person.js");
         setPersonLogger(logger);
 
         const action = (params.action as string) || "create";
@@ -472,7 +473,6 @@ export default function register(api: any): void {
     auth: "plugin",
     match: "prefix",
     handler: async (req: any, res: any) => {
-      const { handleGraphRequest } = await import("../ui/graph-handler.js");
       const host = req.headers.host ?? "localhost";
       const protocol = req.headers["x-forwarded-proto"] ?? "http";
       const url = new URL(req.url ?? "/", `${protocol}://${host}`);
