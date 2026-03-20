@@ -1,6 +1,6 @@
 {
   "name": "qmemory",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Graph memory for AI agents — context engine for OpenClaw + MCP server for Claude Code/Claude.ai",
   "type": "module",
   "main": "dist/openclaw/index.js",
