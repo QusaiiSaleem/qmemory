@@ -90,3 +90,7 @@ SELECT count() AS c FROM memory WHERE embedding IS NOT NONE GROUP ALL;
 SELECT count() AS c, type FROM relates GROUP BY type ORDER BY c DESC;
 SELECT count() AS c FROM relates GROUP ALL;
 SELECT type FROM relates WHERE type = 'spawned' LIMIT 5;
+SELECT id, session_key, channel, chat_type, last_active FROM session ORDER BY last_active DESC LIMIT 10;
+SELECT content, created_at FROM memory WHERE is_active = true ORDER BY created_at DESC LIMIT 5;
+SELECT count() AS c FROM message GROUP ALL;
+SELECT name, type, external_source, external_id FROM entity WHERE type IN ['channel', 'topic'] ORDER BY type;

@@ -970,6 +970,48 @@ export function createEngine(
 
       const { messages, tokenBudget, currentTokenCount } = params;
 
+      // --- STORE MESSAGES ---
+      // OpenClaw calls afterTurn() INSTEAD of ingest() when afterTurn exists.
+      // Store the last few messages so cross-session message search works.
+      // This is what makes Qmemory bypass OpenClaw's session isolation.
+      if (currentSessionId && messages.length > 0) {
+        try {
+          const sid = sessionIdPart(currentSessionId);
+          // Only store the last 2 messages (current turn) to avoid re-storing old ones
+          const newMsgs = messages.slice(-2);
+          for (const m of newMsgs) {
+            const text = extractText((m as any)?.content);
+            if (!text || text.length < 5) continue;
+            const role = (m as any)?.role ?? "unknown";
+            const msgId = `message:${generateId("m")}`;
+            await query(
+              `CREATE $id CONTENT {
+                session: type::record("session", $sid),
+                role: $role,
+                content: $content,
+                token_count: $tokenCount,
+                created_at: time::now()
+              }`,
+              {
+                id: msgId,
+                sid,
+                role,
+                content: text.slice(0, 2000), // Cap to avoid huge records
+                tokenCount: estimateTokens(text),
+              },
+            );
+            // Create structural edge
+            await query(
+              `LET $f = type::record("session", $sid); LET $t = type::record($to);
+               RELATE $f->has_message->$t SET created_at = time::now();`,
+              { sid, to: msgId },
+            );
+          }
+        } catch (msgErr) {
+          logger.debug(`Message storage failed (non-fatal): ${msgErr}`);
+        }
+      }
+
       // --- MULTI-STAGE COMPACTION ---
       if (tokenBudget && currentTokenCount) {
         const usageRatio = currentTokenCount / tokenBudget;

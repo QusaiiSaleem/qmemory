@@ -72,12 +72,13 @@ Example: qmemory_save({content: "User prefers Arabic for reports", category: "pr
 </tool>
 
 <tool name="qmemory_search">
-Search across ALL sessions by meaning, category, or scope. Also searches tool call history when requested.
-The injected "Recent Tool Calls" table only shows the current session. Use include_tool_calls to see ALL sessions.
+Search across ALL sessions — memories, tool calls, and messages. Bypasses OpenClaw's session isolation.
+OpenClaw blocks sessions_history across sessions. But Qmemory stores all messages in its own graph.
+Use include_messages to read what happened in OTHER sessions (groups, topics, crons, DMs).
 Examples:
 - Find memories: qmemory_search({query: "Railway deployment"})
+- Read other sessions: qmemory_search({query: "أسامة", include_messages: true})
 - Find tool history: qmemory_search({include_tool_calls: true, tool_name: "exec"})
-- Find both: qmemory_search({query: "Railway", include_tool_calls: true})
 </tool>
 
 <tool name="qmemory_correct">
@@ -321,6 +322,11 @@ export default function register(api: any): void {
             description: "Filter tool calls by tool name (e.g. 'exec', 'qmemory_save')",
           }),
         ),
+        include_messages: Type.Optional(
+          Type.Boolean({
+            description: "Search messages across ALL sessions — bypasses OpenClaw's session isolation",
+          }),
+        ),
       }),
       execute: async (
         _toolCallId: string,
@@ -355,8 +361,22 @@ export default function register(api: any): void {
           toolCalls = results ?? [];
         }
 
+        // Optionally search messages across ALL sessions
+        let crossSessionMessages: unknown[] = [];
+        if (params.include_messages && params.query) {
+          const msgResults = await query<Record<string, unknown>>(
+            `SELECT role, content, created_at, session FROM message
+             WHERE content ~ $query
+             ORDER BY created_at DESC
+             LIMIT $limit`,
+            { query: params.query, limit: (params.limit as number) ?? 10 },
+          );
+          crossSessionMessages = msgResults ?? [];
+        }
+
         const response: Record<string, unknown> = { memories };
         if (toolCalls.length > 0) response.tool_calls = toolCalls;
+        if (crossSessionMessages.length > 0) response.messages = crossSessionMessages;
 
         return {
           content: [
