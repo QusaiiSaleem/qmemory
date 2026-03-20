@@ -56,6 +56,9 @@ import type { SubagentRunner } from "./index.js";
 import type { SharedEngineState } from "./hooks.js";
 import type { ToolCall } from "../config.js";
 
+// Module-level logger — set by createEngine(), used by extractText()
+let moduleLogger: QmemoryLogger | null = null;
+
 // ---------------------------------------------------------------------------
 // Schema file path — resolved relative to this file's location
 // ---------------------------------------------------------------------------
@@ -94,13 +97,22 @@ function extractText(content: unknown): string {
 
   // Array of content blocks — extract text from "text" blocks
   if (Array.isArray(content)) {
-    return content
+    const text = content
       .filter((block: any) => block?.type === "text" && typeof block?.text === "string")
       .map((block: any) => block.text)
       .join("\n");
+    // Warn if array had items but none were text blocks (new provider format?)
+    if (text.length === 0 && content.length > 0) {
+      const types = content.map((b: any) => b?.type ?? typeof b).join(", ");
+      moduleLogger?.debug(`extractText: no text blocks in array of ${content.length} items (types: ${types})`);
+    }
+    return text;
   }
 
-  // Null/undefined/other — empty string
+  // Non-null unknown type — log so we catch new provider formats
+  if (content !== null && content !== undefined) {
+    moduleLogger?.debug(`extractText: unexpected content type: ${typeof content}`);
+  }
   return "";
 }
 
@@ -192,10 +204,11 @@ export function createEngine(
   let graphMapCache: string | null = null;
   let graphMapCacheTime: number = 0;
 
-  // Set the logger on the DB client and core modules
+  // Set the logger on the DB client, core modules, and module-level
   setLogger(logger);
   setScratchpadLogger(logger);
   setMetricsLogger(logger);
+  moduleLogger = logger;
 
   return {
     // ----- Engine metadata -----
