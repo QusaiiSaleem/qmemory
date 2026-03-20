@@ -39,7 +39,7 @@ export async function trackEvent(
     if (data !== undefined) {
       await query(
         `CREATE type::record("metrics", $idPart) CONTENT {
-          session: $session,
+          session: type::record($session),
           event_type: $eventType,
           event_data: $eventData,
           created_at: time::now()
@@ -49,7 +49,7 @@ export async function trackEvent(
     } else {
       await query(
         `CREATE type::record("metrics", $idPart) CONTENT {
-          session: $session,
+          session: type::record($session),
           event_type: $eventType,
           created_at: time::now()
         }`,
@@ -80,7 +80,7 @@ export async function getSessionMetrics(sessionId: string): Promise<MetricsSumma
     const rows = await query<{ event_type: string; total: number }>(
       `SELECT event_type, count() AS total
        FROM metrics
-       WHERE session = $session
+       WHERE session = type::record($session)
        GROUP BY event_type`,
       { session: sessionId },
     );

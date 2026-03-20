@@ -141,7 +141,7 @@ export function createAfterToolCallHandler(
 
       await query(
         `CREATE type::record("tool_call", $idPart) CONTENT {
-          session: $session,
+          session: type::record($session),
           tool_name: $toolName,
           input_summary: $inputSummary,
           output_summary: $outputSummary,

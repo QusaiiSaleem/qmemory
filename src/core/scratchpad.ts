@@ -22,7 +22,7 @@ export function setScratchpadLogger(l: QmemoryLogger): void {
 export async function getScratchpad(sessionId: string): Promise<Scratchpad | null> {
   try {
     const results = await query<Scratchpad>(
-      "SELECT * FROM scratchpad WHERE session = $session LIMIT 1",
+      "SELECT * FROM scratchpad WHERE session = type::record($session) LIMIT 1",
       { session: sessionId },
     );
     return results?.[0] ?? null;
@@ -43,7 +43,7 @@ export async function updateScratchpad(
   try {
     // Atomic upsert — no race condition between SELECT and CREATE.
     // UPSERT by session, merge only non-empty fields.
-    const setClauses: string[] = ["session = $session", "updated_at = time::now()"];
+    const setClauses: string[] = ["session = type::record($session)", "updated_at = time::now()"];
     const params: Record<string, unknown> = { session: sessionId };
 
     if (updates.task_progress !== undefined && updates.task_progress.length > 0) {
@@ -65,20 +65,20 @@ export async function updateScratchpad(
 
     // Use UPDATE ... WHERE with CREATE fallback (SurrealDB 3.0 compatible)
     const existing = await query<{ id: string }>(
-      "SELECT id FROM scratchpad WHERE session = $session LIMIT 1",
+      "SELECT id FROM scratchpad WHERE session = type::record($session) LIMIT 1",
       { session: sessionId },
     );
 
     if (existing && existing.length > 0) {
       await query(
-        `UPDATE scratchpad SET ${setClauses.join(", ")} WHERE session = $session`,
+        `UPDATE scratchpad SET ${setClauses.join(", ")} WHERE session = type::record($session)`,
         params,
       );
     } else {
       const idPart = generateId("sp");
       await query(
         `CREATE type::record("scratchpad", $idPart) CONTENT {
-          session: $session,
+          session: type::record($session),
           task_progress: $taskProgress,
           key_findings: $keyFindings,
           open_questions: $openQuestions,
@@ -106,7 +106,7 @@ export async function updateScratchpad(
 export async function clearScratchpad(sessionId: string): Promise<void> {
   try {
     await query(
-      "DELETE scratchpad WHERE session = $session",
+      "DELETE scratchpad WHERE session = type::record($session)",
       { session: sessionId },
     );
   } catch (error) {

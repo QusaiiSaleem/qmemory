@@ -387,7 +387,7 @@ export function createEngine(
       // Create message node
       await query(
         `CREATE $id CONTENT {
-          session: $session,
+          session: type::record($session),
           role: $role,
           content: $content,
           tool_calls: $toolCalls,
@@ -515,7 +515,7 @@ export function createEngine(
           const ledgerBudget = Math.floor(memoryBudget * 0.05);
           const recentCalls = await query<ToolCall>(
             `SELECT * FROM tool_call
-             WHERE session = $session
+             WHERE session = type::record($session)
              ORDER BY created_at DESC
              LIMIT 20`,
             { session: currentSessionId },
@@ -827,7 +827,7 @@ export function createEngine(
           if (currentSessionId) {
             try {
               await query(
-                "DELETE tool_call WHERE session = $session",
+                "DELETE tool_call WHERE session = type::record($session)",
                 { session: currentSessionId },
               );
               await clearScratchpad(currentSessionId);
@@ -844,7 +844,7 @@ export function createEngine(
               // Keep only the 10 most recent tool calls
               const oldCalls = await query<{ id: string }>(
                 `SELECT id FROM tool_call
-                 WHERE session = $session
+                 WHERE session = type::record($session)
                  ORDER BY created_at DESC
                  LIMIT 1000 START 10`,
                 { session: currentSessionId },
