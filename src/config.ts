@@ -347,6 +347,23 @@ export function fitToTokenBudget(
   return result;
 }
 
+/** Human-readable age: "2h ago", "3d ago", "2w ago" */
+function getAge(isoDate: string): string {
+  try {
+    const ms = Date.now() - new Date(isoDate).getTime();
+    if (ms < 0) return "";
+    const hours = Math.floor(ms / 3_600_000);
+    if (hours < 1) return " (just now)";
+    if (hours < 24) return ` (${hours}h ago)`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return ` (${days}d ago)`;
+    const weeks = Math.floor(days / 7);
+    return ` (${weeks}w ago)`;
+  } catch {
+    return "";
+  }
+}
+
 /** Format recalled memories as markdown for system prompt injection */
 /**
  * Format memories as a structured graph map for system prompt injection.
@@ -392,9 +409,13 @@ export function formatMemories(
 
     sections.push("", `### ${label}`);
     for (const m of items) {
+      // Short ID for agent to reference in correct/link/delete calls
+      const shortId = String(m.id).replace("memory:", "");
       const marker = m.salience >= 0.8 ? "!" : "";
+      const scope = m.scope && m.scope !== "global" ? ` [${m.scope}]` : "";
       const expiry = m.valid_until ? ` (expires: ${m.valid_until})` : "";
-      sections.push(`- ${marker}${m.content}${expiry}`);
+      const age = getAge(m.created_at);
+      sections.push(`- [${shortId}] ${marker}${m.content}${scope}${expiry}${age}`);
     }
   }
 

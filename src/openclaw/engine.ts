@@ -509,12 +509,17 @@ export function createEngine(
       const memBudget = Math.floor(memoryBudget * 0.52);
       const fitted = fitToTokenBudget(memories, memBudget);
 
-      // Build injection — FOUR parts on EVERY message:
-      // 0. Tool call ledger (recent tool calls)
-      // 1. Categorized memories (contextual to conversation)
-      // 2. Knowledge graph map (entities + relationships)
-      // 3. Tools list (first message only)
+      // Build injection — session header + FOUR parts:
       const parts: string[] = [];
+
+      // Session context header — orientation for the agent
+      if (currentSessionKey) {
+        const parsed = parseSessionKey(currentSessionKey);
+        const channelLabel = parsed.channel !== "unknown" ? parsed.channel : "direct";
+        const topicLabel = parsed.topicId ? `/topic:${parsed.topicId}` : "";
+        const scopeLabel = sessionScope !== "global" ? ` | scope: ${sessionScope}` : "";
+        parts.push(`_Session: ${channelLabel}/${parsed.chatType}${topicLabel}${scopeLabel} | ${fitted.length} memories recalled_`);
+      }
 
       // Part 0: Tool call ledger — max 5% of memory budget
       try {
