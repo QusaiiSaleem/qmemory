@@ -156,7 +156,21 @@ export default function register(api: any): void {
       label: "Qmemory Search",
       description:
         "Search cross-session memory by meaning, category, scope, or graph traversal. " +
-        "Use when you need to recall past knowledge from any session or topic.",
+        "Use when you need to recall past knowledge from any session or topic.\n\n" +
+        "WHY: Your context window resets every session. This tool is how you remember " +
+        "past decisions, people, projects, and preferences across sessions. Without it, " +
+        "you repeat mistakes and forget commitments.\n\n" +
+        "WHEN TO USE: Before answering ANY question about prior work, people, dates, " +
+        "or decisions. Before choosing a topic to send to. Before making a recommendation " +
+        "that should be informed by history.\n\n" +
+        "WHEN NOT TO USE: For current-session context (you already have it). " +
+        "For web searches (use web_search instead).\n\n" +
+        "RETURNS: Array of {id, content, category, salience, scope, confidence} objects, " +
+        "sorted by relevance.\n\n" +
+        "EXAMPLES:\n" +
+        '- Find a person: qmemory_search({query: "John"})\n' +
+        '- Find decisions: qmemory_search({categories: ["decision"], scope: "project:acme"})\n' +
+        '- Find everything about a topic: qmemory_search({query: "product launch timeline"})',
       parameters: Type.Object({
         query: Type.Optional(
           Type.String({ description: "Search by meaning (BM25 full-text)" }),
@@ -202,7 +216,21 @@ export default function register(api: any): void {
       label: "Qmemory Save",
       description:
         "Save a fact to cross-session memory with LLM-driven deduplication. " +
-        "The system will check for duplicates and update existing memories if needed.",
+        "The system will check for duplicates and update existing memories if needed.\n\n" +
+        "WHY: Every session you start from zero. If you learn something important and " +
+        "don't save it, it's lost forever. This is how you get smarter over time — " +
+        "each session should leave the graph richer than it found it.\n\n" +
+        "WHEN TO USE: New person mentioned → save + link. Decision made → save as 'decision'. " +
+        "User corrects you → save as 'feedback'. New project info → save as 'context'. " +
+        "Lesson learned → save as 'feedback'.\n\n" +
+        "WHEN NOT TO USE: Trivial greetings, temporary task status (use scratchpad), " +
+        "raw tool outputs (they go to tool_call ledger automatically).\n\n" +
+        "RETURNS: {action: 'ADD'|'UPDATE'|'NOOP', memory_id: string}. " +
+        "ADD = new memory created. UPDATE = replaced an older version. NOOP = already known.\n\n" +
+        "EXAMPLES:\n" +
+        '- New person: qmemory_save({content: "Alice — engineering lead at Acme", category: "context", salience: 0.6})\n' +
+        '- Decision: qmemory_save({content: "Decided to use PostgreSQL instead of MongoDB", category: "decision", salience: 0.8, scope: "project:acme"})\n' +
+        '- Correction: qmemory_save({content: "User prefers short direct responses", category: "feedback", salience: 0.9})',
       parameters: Type.Object({
         content: Type.String({ description: "The fact to remember (one clear statement)" }),
         category: Type.String({
@@ -252,10 +280,19 @@ export default function register(api: any): void {
       name: "qmemory_correct",
       label: "Qmemory Correct",
       description:
-        "Fix, update, delete, or unlink memories and relationships. " +
-        "4 actions: 'correct' = fix content (creates version chain), " +
-        "'delete' = soft-delete, 'update' = change salience/scope/expiry without new version, " +
-        "'unlink' = remove a relationship edge. Use when user gives feedback.",
+        "Fix, update, or delete memories and relationships. " +
+        "4 actions: 'correct' (fix content, creates version chain), " +
+        "'delete' (soft-delete), 'update' (change salience/scope/expiry), " +
+        "'unlink' (remove a relationship edge).\n\n" +
+        "WHY: Memory must stay accurate. Wrong memories cause wrong decisions in future " +
+        "sessions. When a user corrects you, the old fact must be fixed — not duplicated.\n\n" +
+        "WHEN TO USE: User says 'that's wrong' → correct. Info expired → update with valid_until. " +
+        "Memory is junk → delete. Wrong relationship → unlink.\n\n" +
+        "RETURNS: {ok: true} on success.\n\n" +
+        "EXAMPLES:\n" +
+        '- Fix wrong info: qmemory_correct({memory_id: "memory:xxx", action: "correct", new_content: "الصحيح هو..."})\n' +
+        '- Mark expired: qmemory_correct({memory_id: "memory:xxx", action: "update", valid_until: "2026-03-01"})\n' +
+        '- Delete junk: qmemory_correct({memory_id: "memory:xxx", action: "delete"})',
       parameters: Type.Object({
         memory_id: Type.String({ description: "The memory ID to correct (e.g. memory:xxx)" }),
         action: Type.String({
@@ -311,7 +348,20 @@ export default function register(api: any): void {
       description:
         "Create a relationship between any two things in memory. " +
         "The type can be ANY relationship — supports, contradicts, manages, " +
-        "blocks, depends_on, caused_by, or anything that fits.",
+        "blocks, depends_on, caused_by, or anything that fits.\n\n" +
+        "WHY: Isolated facts are weak. Connected facts are intelligence. A person linked " +
+        "to a project linked to a decision linked to a topic — that's how you understand " +
+        "context instantly in future sessions. No orphan nodes.\n\n" +
+        "WHEN TO USE: After EVERY qmemory_save or qmemory_person — link the new node to " +
+        "something that already exists. Link people to projects. Link decisions to the " +
+        "decisions they replace. Link memories to topic entities.\n\n" +
+        "WHEN NOT TO USE: Don't create weak/trivial links just to link. The relationship " +
+        "should be meaningful and specific.\n\n" +
+        "RETURNS: {edge_id: 'relates:xxx'}\n\n" +
+        "EXAMPLES:\n" +
+        '- Person → project: qmemory_link({from_id: "entity:p_xxx", to_id: "entity:topic_eduarabia", type: "works_at"})\n' +
+        '- Decision chain: qmemory_link({from_id: "memory:new", to_id: "memory:old", type: "supersedes"})\n' +
+        '- Memory → topic: qmemory_link({from_id: "memory:xxx", to_id: "entity:topic_sales", type: "belongs_to"})',
       parameters: Type.Object({
         from_id: Type.String({ description: "Source node ID (e.g. memory:xxx, entity:xxx)" }),
         to_id: Type.String({ description: "Target node ID (e.g. memory:xxx, entity:xxx)" }),
@@ -353,9 +403,15 @@ export default function register(api: any): void {
       description:
         "Import a memory file into the Qmemory graph. " +
         "Reads the file, extracts facts using AI, saves with dedup, " +
-        "and creates relationships. Use to migrate old memory files " +
-        "or import any markdown file as knowledge. " +
-        "Example: qmemory_import({file_path: '~/.openclaw/workspace/memory/2026-03-14.md'})",
+        "and creates relationships.\n\n" +
+        "WHY: Bulk-load knowledge from existing markdown files, meeting notes, or daily logs " +
+        "into the graph — faster than saving facts one by one.\n\n" +
+        "WHEN TO USE: Migrating old memory files. Importing a document someone shared. " +
+        "Loading daily notes that weren't auto-extracted.\n\n" +
+        "WHEN NOT TO USE: For single facts (use qmemory_save). For real-time conversation " +
+        "extraction (afterTurn handles that automatically).\n\n" +
+        "RETURNS: {facts_extracted: number, memories_created: number}\n\n" +
+        "EXAMPLE: qmemory_import({file_path: '~/.openclaw/workspace/memory/2026-03-14.md'})",
       parameters: Type.Object({
         file_path: Type.String({
           description: "Absolute path to the markdown file to import",
@@ -391,11 +447,19 @@ export default function register(api: any): void {
       description:
         "Create or find a person with multiple linked identities (WhatsApp, email, " +
         "Telegram, Smartsheet, etc). A person can have many contacts — each linked " +
-        "via 'has_identity'. Use to build a contact graph that connects people to " +
-        "their messages, tasks, emails, and decisions across all systems.\n\n" +
-        "Examples:\n" +
-        "- Create: qmemory_person({ name: 'Ahmed', contacts: [{source: 'whatsapp', id: '966501234567'}, {source: 'gmail', id: 'ahmed@example.com'}] })\n" +
-        "- Find: qmemory_person({ name: 'Ahmed', action: 'find' })",
+        "via 'has_identity'.\n\n" +
+        "WHY: People appear across many systems — WhatsApp, email, Smartsheet, calendar. " +
+        "This tool unifies them into one entity so you can say 'find everything about Ahmed' " +
+        "and get his phone, email, linked memories, and project roles in one query.\n\n" +
+        "WHEN TO USE: New person mentioned in conversation → create with aliases. " +
+        "Need context about someone → find. Always link the person to their project/topic after creation.\n\n" +
+        "WHEN NOT TO USE: For organizations or projects (those are topic entities, not persons). " +
+        "For anonymous mentions ('someone said...').\n\n" +
+        "RETURNS (create): {person_id, contact_ids, links_created}\n" +
+        "RETURNS (find): Person name, aliases, all contacts, and linked memories.\n\n" +
+        "EXAMPLES:\n" +
+        "- Create: qmemory_person({name: 'Alice', aliases: ['Ali'], contacts: [{source: 'whatsapp', id: '15551234567'}]})\n" +
+        "- Find: qmemory_person({name: 'Alice', action: 'find'})",
       parameters: Type.Object({
         name: Type.String({ description: "Person's name" }),
         action: Type.Optional(
