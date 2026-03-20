@@ -491,8 +491,10 @@ export function formatGraphMap(
     byType[t].push(e);
   }
 
-  // Display order for entity types
+  // Display order for entity types — channels/topics first for navigation
   const typeLabels: Record<string, string> = {
+    channel: "Channels",
+    topic: "Topics",
     person: "People",
     project: "Projects",
     org: "Organizations",
