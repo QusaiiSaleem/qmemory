@@ -38,21 +38,40 @@ Qmemory is NOT just a memory system — it's the agent's **situational awareness
 6. **Knowledge graph** — entities + relationships map
 7. **Tools guide** — memory tools reference (first message only)
 
-## OpenClaw hooks — current + planned
+## OpenClaw hooks (12 registered)
 
 | Hook | Status | What it captures |
 |------|--------|-----------------|
-| `after_tool_call` | DONE | Log tool calls → tool_call table |
+| `after_tool_call` | DONE | Log tool calls → tool_call table (survives compaction) |
 | `tool_result_persist` | DONE | Compress large tool results before storage |
-| `before_prompt_build` | TODO | Append agent instructions (appendSystemContext) |
-| `agent_end` | TODO | Capture cron/subagent outcomes → memory with source_type "cron" |
-| `llm_output` | TODO | Token usage tracking (input, output, cache hits) → metrics |
-| `subagent_spawned` | TODO | Create session→spawned→session edge in graph |
-| `subagent_ended` | TODO | Capture child outcome, create summary memory |
-| `session_start` | TODO | Track session lifecycle, log gateway restart awareness |
-| `session_end` | TODO | Session duration, final message count |
-| `before_compaction` | TODO | Snapshot of what's about to be compacted |
-| `message_received` | SKIP | Passive group listening (noisy, low priority) |
+| `before_prompt_build` | DONE | Append agent instructions via appendSystemContext (cached) |
+| `agent_end` | DONE | Cron/heartbeat/subagent outcomes → memory (with delivery target) |
+| `llm_output` | DONE | Token usage + model name → metrics + session header |
+| `subagent_spawned` | DONE | Create session→spawned→session graph edge |
+| `subagent_ended` | DONE | Capture child outcome, save failures as memories |
+| `subagent_delivery_target` | DONE | Track where cron/subagent output is routed |
+| `session_start` | DONE | Track session lifecycle, save "resumed from" as memory |
+| `session_end` | DONE | Session duration + message count → metrics |
+| `message_received` | DONE | Upsert sender as entity (agent sees who's talking) |
+| `message_sent` | DONE | Track delivery target + failures |
+
+## Graph edges — what's connected
+
+| Edge | From → To | Created by | Status |
+|------|-----------|-----------|--------|
+| `has_message` | session → message | `ingest()` | DONE |
+| `prev_version` | memory → memory | `saveMemory()` UPDATE | DONE |
+| `relates` (any type) | memory ↔ memory/entity | Linker service (5 min) | DONE |
+| `spawned` | session → session | `subagent_spawned` hook | DONE |
+| `has_identity` | person → contact | `qmemory_person` tool | DONE |
+| `extracted_from` | memory → message | — | NOT POSSIBLE — OpenClaw doesn't pass message IDs to compact/afterTurn |
+
+## Known architectural limits
+
+- **`extracted_from` edges**: Schema defines them but they can't be created. OpenClaw's messages array passed to `compact()`/`afterTurn()` doesn't include our SurrealDB message IDs. We'd need OpenClaw to pass message IDs or a content-hash mapping.
+- **Telegram events** (edits, deletes, reactions, joins/leaves): OpenClaw doesn't expose these via hooks. Only `message_received` fires for new messages.
+- **Diagnostic events** (heartbeat health, webhook stats, queue depth): Internal to OpenClaw, not hookable by plugins.
+- **Group participant list**: OpenClaw doesn't expose Telegram group member API to plugins.
 
 ## Context injection — what the agent sees
 
@@ -64,11 +83,13 @@ Injected via `systemPromptAddition` in `assemble()`. Built from Anthropic's prom
 - Session header for orientation
 
 The `before_prompt_build` hook adds static instructions via `appendSystemContext`
-(cached by the provider, no per-turn token cost). This teaches the agent:
+(cached by the provider, no per-turn token cost). Defined in `AGENT_SYSTEM_CONTEXT`
+constant in `index.ts`. Follows Anthropic prompting best practices (XML tags,
+examples, clear motivation). Teaches the agent:
 - What the graph contains (tables, relationships)
-- How to use each qmemory tool
+- How to use each qmemory tool (with examples)
 - When to save vs search vs link
-- How to read the injected context
+- How to read the injected context (IDs, scope tags, age)
 
 ## Design principles
 
@@ -184,6 +205,7 @@ Auth: `plugin` mode (no token needed on localhost).
 ## Background Services
 
 - **Linker** (every 5 min): finds unlinked memories, asks subagent for relationships, creates `relates` edges
+- **Salience Decay** (every 5 min): memories older than 7 days get salience *= 0.95 (floor 0.1)
 - **Reflect** (every 30 min): synthesizes insights across memories, resolves contradictions
 
 ## Memory Fields
