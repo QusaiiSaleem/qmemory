@@ -7,6 +7,13 @@
  * Hooks:
  *   after_tool_call    — log every tool call to the ledger
  *   tool_result_persist — compress large tool results before storage
+ *
+ * NOTE on after_tool_call: OpenClaw fires this hook and tracks tool calls
+ * internally, but does NOT expose a queryable API for plugins to read
+ * past tool calls. Our hook saves a compressed summary to SurrealDB's
+ * tool_call table so that assemble() can inject a ledger into context.
+ * This is the only way to give the agent visibility into its own tool
+ * history across turns. Not duplication — complementary persistence.
  */
 
 import { query, generateId } from "../db/client.js";
@@ -120,28 +127,35 @@ export function createAfterToolCallHandler(
       const tokenCount = estimateTokens(outputSummary);
 
       const idPart = generateId("tc");
+      // Build params — omit duration_ms if undefined (SurrealDB 3.0 rejects NULL for option<int>)
+      const params: Record<string, unknown> = {
+        idPart,
+        session: sharedState.currentSessionId,
+        toolName: event.toolName,
+        inputSummary,
+        outputSummary,
+        tokenCount,
+      };
+      const durationField = event.durationMs !== undefined ? "duration_ms: $durationMs," : "";
+      if (event.durationMs !== undefined) params.durationMs = event.durationMs;
+
       await query(
         `CREATE type::record("tool_call", $idPart) CONTENT {
           session: $session,
           tool_name: $toolName,
           input_summary: $inputSummary,
           output_summary: $outputSummary,
-          duration_ms: $durationMs,
+          ${durationField}
           token_count: $tokenCount,
           created_at: time::now()
         }`,
-        {
-          idPart,
-          session: sharedState.currentSessionId,
-          toolName: event.toolName,
-          inputSummary,
-          outputSummary,
-          durationMs: event.durationMs ?? null,
-          tokenCount,
-        },
+        params,
       );
 
       logger.debug(`Tool ledger: ${event.toolName} (${event.durationMs ?? "?"}ms)`);
+
+      // Track tool_call metric (fire-and-forget)
+      trackEvent(sharedState.currentSessionId!, "tool_call", event.toolName).catch(() => {});
     } catch (error) {
       // Fire-and-forget — never block the agent loop
       logger.debug(`Tool ledger write failed: ${error}`);

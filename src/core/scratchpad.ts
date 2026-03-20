@@ -41,39 +41,40 @@ export async function updateScratchpad(
   updates: Partial<Pick<Scratchpad, "task_progress" | "key_findings" | "open_questions" | "tool_summary">>,
 ): Promise<void> {
   try {
-    // Check if a scratchpad already exists
-    const existing = await getScratchpad(sessionId);
+    // Atomic upsert — no race condition between SELECT and CREATE.
+    // UPSERT by session, merge only non-empty fields.
+    const setClauses: string[] = ["session = $session", "updated_at = time::now()"];
+    const params: Record<string, unknown> = { session: sessionId };
 
-    if (existing) {
-      // Build SET clauses only for non-empty fields
-      const setClauses: string[] = ["updated_at = time::now()"];
-      const params: Record<string, unknown> = { id: existing.id };
+    if (updates.task_progress !== undefined && updates.task_progress.length > 0) {
+      setClauses.push("task_progress = $taskProgress");
+      params.taskProgress = updates.task_progress;
+    }
+    if (updates.key_findings !== undefined && updates.key_findings.length > 0) {
+      setClauses.push("key_findings = $keyFindings");
+      params.keyFindings = updates.key_findings;
+    }
+    if (updates.open_questions !== undefined && updates.open_questions.length > 0) {
+      setClauses.push("open_questions = $openQuestions");
+      params.openQuestions = updates.open_questions;
+    }
+    if (updates.tool_summary !== undefined && updates.tool_summary.length > 0) {
+      setClauses.push("tool_summary = $toolSummary");
+      params.toolSummary = updates.tool_summary;
+    }
 
-      if (updates.task_progress !== undefined && updates.task_progress.length > 0) {
-        setClauses.push("task_progress = $taskProgress");
-        params.taskProgress = updates.task_progress;
-      }
-      if (updates.key_findings !== undefined && updates.key_findings.length > 0) {
-        setClauses.push("key_findings = $keyFindings");
-        params.keyFindings = updates.key_findings;
-      }
-      if (updates.open_questions !== undefined && updates.open_questions.length > 0) {
-        setClauses.push("open_questions = $openQuestions");
-        params.openQuestions = updates.open_questions;
-      }
-      if (updates.tool_summary !== undefined && updates.tool_summary.length > 0) {
-        setClauses.push("tool_summary = $toolSummary");
-        params.toolSummary = updates.tool_summary;
-      }
+    // Use UPDATE ... WHERE with CREATE fallback (SurrealDB 3.0 compatible)
+    const existing = await query<{ id: string }>(
+      "SELECT id FROM scratchpad WHERE session = $session LIMIT 1",
+      { session: sessionId },
+    );
 
-      if (setClauses.length > 1) { // More than just updated_at
-        await query(
-          `UPDATE $id SET ${setClauses.join(", ")}`,
-          params,
-        );
-      }
+    if (existing && existing.length > 0) {
+      await query(
+        `UPDATE scratchpad SET ${setClauses.join(", ")} WHERE session = $session`,
+        params,
+      );
     } else {
-      // Create new scratchpad
       const idPart = generateId("sp");
       await query(
         `CREATE type::record("scratchpad", $idPart) CONTENT {

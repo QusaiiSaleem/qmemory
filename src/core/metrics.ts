@@ -35,24 +35,27 @@ export async function trackEvent(
 ): Promise<void> {
   try {
     const idPart = generateId("mt");
-    // Build params — omit event_data if undefined (SurrealDB 3.0 rejects NULL for option<string>)
-    const params: Record<string, unknown> = {
-      idPart,
-      session: sessionId,
-      eventType,
-    };
-    const dataField = data !== undefined ? "event_data: $eventData," : "";
-    if (data !== undefined) params.eventData = data;
 
-    await query(
-      `CREATE type::record("metrics", $idPart) CONTENT {
-        session: $session,
-        event_type: $eventType,
-        ${dataField}
-        created_at: time::now()
-      }`,
-      params,
-    );
+    if (data !== undefined) {
+      await query(
+        `CREATE type::record("metrics", $idPart) CONTENT {
+          session: $session,
+          event_type: $eventType,
+          event_data: $eventData,
+          created_at: time::now()
+        }`,
+        { idPart, session: sessionId, eventType, eventData: data },
+      );
+    } else {
+      await query(
+        `CREATE type::record("metrics", $idPart) CONTENT {
+          session: $session,
+          event_type: $eventType,
+          created_at: time::now()
+        }`,
+        { idPart, session: sessionId, eventType },
+      );
+    }
   } catch {
     // Fire-and-forget — never fail the caller
   }

@@ -229,7 +229,7 @@ export default function register(api: any): void {
         "ADD = new memory created. UPDATE = replaced an older version. NOOP = already known.\n\n" +
         "EXAMPLES:\n" +
         '- New person: qmemory_save({content: "Alice — engineering lead at Acme", category: "context", salience: 0.6})\n' +
-        '- Decision: qmemory_save({content: "Decided to use PostgreSQL instead of MongoDB", category: "decision", salience: 0.8, scope: "project:acme"})\n' +
+        '- Decision: qmemory_save({content: "Decided to use SurrealDB instead of SQLite", category: "decision", salience: 0.8, scope: "project:acme"})\n' +
         '- Correction: qmemory_save({content: "User prefers short direct responses", category: "feedback", salience: 0.9})',
       parameters: Type.Object({
         content: Type.String({ description: "The fact to remember (one clear statement)" }),

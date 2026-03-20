@@ -50,7 +50,7 @@ import {
 import { enableVectorIndex } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
-import { getScratchpad, updateScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
+import { getScratchpad, updateScratchpad, clearScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
 import { trackEvent, setMetricsLogger } from "../core/metrics.js";
 import type { SubagentRunner } from "./index.js";
 import type { SharedEngineState } from "./hooks.js";
@@ -452,9 +452,10 @@ export function createEngine(
         }
       }
 
-      // Fit to token budget: 60% memories, 40% graph map
+      // Token budget split (must sum to 100%):
+      //   52% memories, 5% tool ledger, 3% scratchpad, 40% graph map
       const isFirstAssemble = !hasShownToolsGuide;
-      const memBudget = Math.floor(memoryBudget * 0.6);
+      const memBudget = Math.floor(memoryBudget * 0.52);
       const fitted = fitToTokenBudget(memories, memBudget);
 
       // Build injection — FOUR parts on EVERY message:
@@ -778,13 +779,15 @@ export function createEngine(
               logger.warn(`Emergency compaction failed: ${error}`);
             }
           }
-          // Also clear all tool_call records for this session
+          // Stage 4 includes all Stage 3 cleanup: clear tool_calls + scratchpad
           if (currentSessionId) {
             try {
               await query(
                 "DELETE tool_call WHERE session = $session",
                 { session: currentSessionId },
               );
+              await clearScratchpad(currentSessionId);
+              logger.debug("Emergency compaction: cleared tool_calls + scratchpad");
             } catch { /* non-fatal */ }
           }
 
@@ -803,9 +806,10 @@ export function createEngine(
                 { session: currentSessionId },
               );
               if (oldCalls && oldCalls.length > 0) {
-                const ids = oldCalls.map(c => c.id);
-                await query("DELETE $ids", { ids });
-                logger.debug(`Heavy compaction: cleared ${ids.length} old tool_call records`);
+                for (const call of oldCalls) {
+                  await query("DELETE type::record($id)", { id: call.id });
+                }
+                logger.debug(`Heavy compaction: cleared ${oldCalls.length} old tool_call records`);
               }
             } catch (error) {
               logger.debug(`Tool call cleanup failed: ${error}`);
@@ -908,8 +912,9 @@ export function createEngine(
       }
 
       // --- SCRATCHPAD UPDATE ---
-      // Extract task state from the last assistant message (only after 5+ turns)
-      if (currentSessionId && messages.length > 5) {
+      // Extract task state from the last assistant message
+      // Rate-limited: only every 5 turns after the first 5, to avoid expensive subagent calls
+      if (currentSessionId && messages.length > 5 && messages.length % 5 === 0) {
         try {
           // Find the last assistant message
           const lastAssistant = [...messages].reverse().find(
