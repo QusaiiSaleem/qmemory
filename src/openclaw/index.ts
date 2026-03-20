@@ -20,6 +20,8 @@ import { resolveEmbeddingConfig, setEmbeddingLogger } from "../core/embeddings.j
 import { importFile, setMigrateLogger } from "../core/migrate.js";
 import { createPerson, findPersonContext, setPersonLogger } from "../core/person.js";
 import { handleGraphRequest } from "../ui/graph-handler.js";
+import { createAfterToolCallHandler } from "./hooks.js";
+import type { SharedEngineState } from "./hooks.js";
 import type {
   QmemoryConfig,
   QmemoryLogger,
@@ -132,11 +134,17 @@ export default function register(api: any): void {
     );
   }
 
-  // 7. Register the context engine
-  const engine = createEngine(config, logger, subagentRunner, openclawConfig, embeddingConfig);
+  // 7. Shared state — lets hooks access the engine's current session
+  const sharedState: SharedEngineState = { currentSessionId: null };
+
+  // 8. Register the context engine
+  const engine = createEngine(config, logger, subagentRunner, openclawConfig, embeddingConfig, sharedState);
   api.registerContextEngine("qmemory", () => engine);
 
   logger.info("Context engine registered");
+
+  // 9. Register lifecycle hooks
+  api.on("after_tool_call", createAfterToolCallHandler(logger, sharedState));
 
   // ----- TOOLS -----
 

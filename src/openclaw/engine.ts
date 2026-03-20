@@ -51,6 +51,8 @@ import { enableVectorIndex } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
 import type { SubagentRunner } from "./index.js";
+import type { SharedEngineState } from "./hooks.js";
+import type { ToolCall } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Schema file path — resolved relative to this file's location
@@ -146,6 +148,7 @@ export function createEngine(
   subagentRunner?: SubagentRunner,
   _openclawConfig?: Record<string, unknown>,
   embeddingConfig?: EmbeddingConfig,
+  sharedState?: SharedEngineState,
 ) {
   // Track the current session for this engine instance
   let currentSessionId: string | null = null;
@@ -269,6 +272,7 @@ export function createEngine(
 
       if (existing && existing.length > 0) {
         currentSessionId = existing[0].id;
+        if (sharedState) sharedState.currentSessionId = currentSessionId;
         await query(
           "UPDATE $id SET last_active = time::now()",
           { id: currentSessionId },
@@ -277,6 +281,7 @@ export function createEngine(
       } else {
         const sessionIdPart = generateId("s");
         currentSessionId = `session:${sessionIdPart}`;
+        if (sharedState) sharedState.currentSessionId = currentSessionId;
         // Build params — omit null optional fields (SurrealDB 3.0 rejects NULL for option<string>)
         const sessionParams: Record<string, unknown> = {
           idPart: sessionIdPart,
@@ -439,11 +444,53 @@ export function createEngine(
       const memBudget = Math.floor(memoryBudget * 0.6);
       const fitted = fitToTokenBudget(memories, memBudget);
 
-      // Build injection — THREE parts on EVERY message:
+      // Build injection — FOUR parts on EVERY message:
+      // 0. Tool call ledger (recent tool calls)
       // 1. Categorized memories (contextual to conversation)
       // 2. Knowledge graph map (entities + relationships)
       // 3. Tools list (first message only)
       const parts: string[] = [];
+
+      // Part 0: Tool call ledger — max 5% of memory budget
+      try {
+        if (currentSessionId) {
+          const ledgerBudget = Math.floor(memoryBudget * 0.05);
+          const recentCalls = await query<ToolCall>(
+            `SELECT * FROM tool_call
+             WHERE session = $session
+             ORDER BY created_at DESC
+             LIMIT 20`,
+            { session: currentSessionId },
+          );
+          if (recentCalls && recentCalls.length > 0) {
+            const rows = recentCalls.reverse().map((tc) => {
+              const ago = tc.duration_ms != null ? `${tc.duration_ms}ms` : "?";
+              return `| ${tc.tool_name} | ${tc.input_summary} | ${tc.output_summary} | ${ago} |`;
+            });
+            let ledgerText =
+              "## Recent Tool Calls\n" +
+              "| Tool | Input | Output | Time |\n" +
+              "|------|-------|--------|------|\n" +
+              rows.join("\n");
+            // Trim to budget
+            const ledgerTokens = estimateTokens(ledgerText);
+            if (ledgerTokens > ledgerBudget) {
+              // Drop oldest rows until it fits
+              while (rows.length > 1 && estimateTokens(ledgerText) > ledgerBudget) {
+                rows.shift();
+                ledgerText =
+                  "## Recent Tool Calls\n" +
+                  "| Tool | Input | Output | Time |\n" +
+                  "|------|-------|--------|------|\n" +
+                  rows.join("\n");
+              }
+            }
+            parts.push(ledgerText);
+          }
+        }
+      } catch (ledgerError) {
+        logger.debug(`Tool ledger injection failed (non-fatal): ${ledgerError}`);
+      }
 
       // Part 1: Categorized memories
       const memoriesText = formatMemories(fitted, isFirstAssemble);
