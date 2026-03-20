@@ -147,3 +147,147 @@ export function createAfterToolCallHandler(
     }
   };
 }
+
+// ---------------------------------------------------------------------------
+// tool_result_persist handler — compress large tool results before storage
+// NOTE: This hook is SYNCHRONOUS (OpenClaw ignores returned Promises)
+// ---------------------------------------------------------------------------
+
+/** Tool names whose results should never be compressed */
+const NEVER_COMPRESS = new Set([
+  "qmemory_search",
+  "qmemory_save",
+  "qmemory_correct",
+  "qmemory_link",
+  "qmemory_import",
+  "qmemory_person",
+]);
+
+/** Token threshold — only compress results larger than this */
+const COMPRESS_THRESHOLD_TOKENS = 500;
+
+/**
+ * Compress a JSON string: extract top-level keys, truncate arrays.
+ */
+function compressJson(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return text;
+
+    if (Array.isArray(parsed)) {
+      // Truncate arrays: first 3 items + count
+      const preview = parsed.slice(0, 3);
+      const suffix = parsed.length > 3 ? `\n... and ${parsed.length - 3} more items` : "";
+      return JSON.stringify(preview, null, 1) + suffix;
+    }
+
+    // Object: keep top-level keys, truncate nested values
+    const compressed: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      if (typeof val === "string" && val.length > 200) {
+        compressed[key] = val.slice(0, 200) + "...";
+      } else if (Array.isArray(val) && val.length > 3) {
+        compressed[key] = [...val.slice(0, 3), `... ${val.length - 3} more`];
+      } else {
+        compressed[key] = val;
+      }
+    }
+    return JSON.stringify(compressed, null, 1);
+  } catch {
+    // Not valid JSON — fall through to text compression
+    return text;
+  }
+}
+
+/**
+ * Compress text: first 200 chars + last 100 chars with ellipsis.
+ */
+function compressText(text: string): string {
+  if (text.length <= 400) return text;
+  return text.slice(0, 200) + "\n...\n" + text.slice(-100);
+}
+
+export function createToolResultPersistHandler(logger: QmemoryLogger) {
+  return (
+    event: {
+      toolName?: string;
+      toolCallId?: string;
+      message: Record<string, unknown>;
+      isSynthetic?: boolean;
+    },
+    _ctx: {
+      agentId?: string;
+      sessionKey?: string;
+      toolName?: string;
+      toolCallId?: string;
+    },
+  ): { message?: Record<string, unknown> } | void => {
+    try {
+      const toolName = event.toolName ?? _ctx.toolName ?? "";
+
+      // Never compress our own tools
+      if (NEVER_COMPRESS.has(toolName)) return;
+
+      // Extract text content from the message
+      const message = event.message;
+      const content = message?.content;
+      if (!Array.isArray(content)) return;
+
+      // Estimate total tokens across all text blocks
+      let totalText = "";
+      for (const block of content) {
+        if (typeof block === "object" && block !== null && (block as Record<string, unknown>).type === "text") {
+          totalText += String((block as Record<string, unknown>).text ?? "");
+        }
+      }
+
+      const originalTokens = estimateTokens(totalText);
+      if (originalTokens <= COMPRESS_THRESHOLD_TOKENS) return;
+
+      // Check if it looks like an error — keep errors intact (usually short)
+      if (totalText.includes("Error:") || totalText.includes("error:")) {
+        if (originalTokens < 1000) return; // Short errors stay as-is
+      }
+
+      // Compress the text content
+      const newContent = content.map((block: unknown) => {
+        if (typeof block !== "object" || block === null) return block;
+        const b = block as Record<string, unknown>;
+        if (b.type !== "text") return block;
+
+        const text = String(b.text ?? "");
+        if (estimateTokens(text) <= COMPRESS_THRESHOLD_TOKENS) return block;
+
+        // Try JSON compression first, then text compression
+        let compressed: string;
+        const trimmed = text.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          compressed = compressJson(trimmed);
+        } else {
+          compressed = compressText(text);
+        }
+
+        compressed = `[compressed from ${originalTokens} tokens]\n${compressed}`;
+        return { ...b, text: compressed };
+      });
+
+      const compressedTokens = estimateTokens(
+        newContent
+          .filter((b: unknown) => typeof b === "object" && b !== null && (b as Record<string, unknown>).type === "text")
+          .map((b: unknown) => String((b as Record<string, unknown>).text ?? ""))
+          .join(""),
+      );
+
+      logger.debug(
+        `Compressed ${toolName}: ${originalTokens} → ${compressedTokens} tokens (${Math.round((1 - compressedTokens / originalTokens) * 100)}% reduction)`,
+      );
+
+      return {
+        message: { ...message, content: newContent },
+      };
+    } catch (error) {
+      // Non-fatal — return void to keep original message
+      logger.debug(`Tool result compression failed: ${error}`);
+    }
+  };
+}

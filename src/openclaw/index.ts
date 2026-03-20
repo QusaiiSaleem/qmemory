@@ -20,7 +20,7 @@ import { resolveEmbeddingConfig, setEmbeddingLogger } from "../core/embeddings.j
 import { importFile, setMigrateLogger } from "../core/migrate.js";
 import { createPerson, findPersonContext, setPersonLogger } from "../core/person.js";
 import { handleGraphRequest } from "../ui/graph-handler.js";
-import { createAfterToolCallHandler } from "./hooks.js";
+import { createAfterToolCallHandler, createToolResultPersistHandler } from "./hooks.js";
 import type { SharedEngineState } from "./hooks.js";
 import type {
   QmemoryConfig,
@@ -145,6 +145,7 @@ export default function register(api: any): void {
 
   // 9. Register lifecycle hooks
   api.on("after_tool_call", createAfterToolCallHandler(logger, sharedState));
+  api.on("tool_result_persist", createToolResultPersistHandler(logger));
 
   // ----- TOOLS -----
 
