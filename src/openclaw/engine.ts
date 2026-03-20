@@ -50,6 +50,7 @@ import {
 import { enableVectorIndex } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
+import { getScratchpad, updateScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
 import type { SubagentRunner } from "./index.js";
 import type { SharedEngineState } from "./hooks.js";
 import type { ToolCall } from "../config.js";
@@ -159,8 +160,9 @@ export function createEngine(
   let graphMapCache: string | null = null;
   let graphMapCacheTime: number = 0;
 
-  // Set the logger on the DB client so it uses OpenClaw's logger
+  // Set the logger on the DB client and core modules
   setLogger(logger);
+  setScratchpadLogger(logger);
 
   return {
     // ----- Engine metadata -----
@@ -495,6 +497,33 @@ export function createEngine(
       // Part 1: Categorized memories
       const memoriesText = formatMemories(fitted, isFirstAssemble);
       if (memoriesText) parts.push(memoriesText);
+
+      // Part 1.5: Session scratchpad (working memory) — max 3% of memory budget
+      try {
+        if (currentSessionId) {
+          const scratchpadBudget = Math.floor(memoryBudget * 0.03);
+          const pad = await getScratchpad(currentSessionId);
+          if (pad) {
+            // Only inject if there's actual content
+            const fields: string[] = [];
+            if (pad.task_progress) fields.push(`**Progress:** ${pad.task_progress}`);
+            if (pad.key_findings) fields.push(`**Findings:** ${pad.key_findings}`);
+            if (pad.open_questions) fields.push(`**Open questions:** ${pad.open_questions}`);
+            if (pad.tool_summary) fields.push(`**Tool summary:** ${pad.tool_summary}`);
+
+            if (fields.length > 0) {
+              let scratchpadText = "## Working Memory\n" + fields.join("\n");
+              // Trim to budget
+              if (estimateTokens(scratchpadText) > scratchpadBudget) {
+                scratchpadText = scratchpadText.slice(0, scratchpadBudget * 4); // ~4 chars/token
+              }
+              parts.push(scratchpadText);
+            }
+          }
+        }
+      } catch (scratchpadError) {
+        logger.debug(`Scratchpad injection failed (non-fatal): ${scratchpadError}`);
+      }
 
       // Part 2: Knowledge graph map — cached with 5-min TTL
       try {
@@ -840,6 +869,50 @@ export function createEngine(
               logger.debug(`Light compaction failed: ${error}`);
             }
           }
+        }
+      }
+
+      // --- SCRATCHPAD UPDATE ---
+      // Extract task state from the last assistant message (only after 5+ turns)
+      if (currentSessionId && messages.length > 5) {
+        try {
+          // Find the last assistant message
+          const lastAssistant = [...messages].reverse().find(
+            (m: any) => m?.role === "assistant" && m?.content,
+          ) as { content: string } | undefined;
+
+          if (lastAssistant && lastAssistant.content.length > 50) {
+            const extractionResult = await subagentRunner(
+              `Analyze this assistant message and extract ONLY what's relevant as working memory.
+Return a JSON object with these fields (use "" for empty):
+- task_progress: What task is being worked on and current status (1-2 sentences max)
+- key_findings: Important data points or discoveries (1-2 sentences max)
+- open_questions: Unresolved questions or next steps (1 sentence max)
+
+Message:
+${lastAssistant.content.slice(0, 1000)}
+
+Respond ONLY with the JSON object, no markdown fencing.`,
+            );
+
+            if (extractionResult) {
+              try {
+                // Strip markdown fencing if present
+                const cleaned = extractionResult.replace(/```json?\n?|\n?```/g, "").trim();
+                const parsed = JSON.parse(cleaned);
+                await updateScratchpad(currentSessionId, {
+                  task_progress: parsed.task_progress ?? "",
+                  key_findings: parsed.key_findings ?? "",
+                  open_questions: parsed.open_questions ?? "",
+                });
+                logger.debug("Scratchpad updated from assistant message");
+              } catch {
+                logger.debug("Scratchpad extraction parse failed (non-fatal)");
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug(`Scratchpad update failed (non-fatal): ${error}`);
         }
       }
 
