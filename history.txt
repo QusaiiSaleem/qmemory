@@ -78,3 +78,5 @@ SELECT count() AS c FROM tool_call GROUP ALL; SELECT count() AS c FROM scratchpa
 SELECT count() AS c FROM memory WHERE embedding IS NOT NONE GROUP ALL;
 SELECT count() AS c FROM memory WHERE is_active = true GROUP ALL;
 SELECT count() AS c FROM memory WHERE is_active = true AND updated_at < time::now() - 7d GROUP ALL;
+SELECT count() AS c FROM memory WHERE is_active = true AND embedding IS NONE GROUP ALL;
+SELECT count() AS c FROM memory WHERE embedding IS NOT NONE GROUP ALL;

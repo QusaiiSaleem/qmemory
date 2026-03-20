@@ -147,6 +147,48 @@ export async function enableVectorIndex(dimension: number): Promise<void> {
   }
 }
 
+/**
+ * Backfill embeddings for all memories that don't have them.
+ * Runs in background — non-blocking, rate-limited to avoid API throttling.
+ */
+export async function backfillEmbeddings(
+  embeddingConfig: EmbeddingConfig,
+): Promise<{ processed: number; failed: number }> {
+  if (embeddingConfig.provider === "none") return { processed: 0, failed: 0 };
+
+  const missing = await query<{ id: string; content: string }>(
+    "SELECT id, content FROM memory WHERE is_active = true AND embedding IS NONE LIMIT 100",
+  );
+
+  if (!missing || missing.length === 0) return { processed: 0, failed: 0 };
+
+  logger.info(`Backfilling embeddings for ${missing.length} memories...`);
+  let processed = 0;
+  let failed = 0;
+
+  for (const mem of missing) {
+    try {
+      const embedding = await generateEmbedding(mem.content, embeddingConfig);
+      if (embedding) {
+        await query(
+          "UPDATE $id SET embedding = $embedding",
+          { id: String(mem.id), embedding },
+        );
+        processed++;
+      } else {
+        failed++;
+      }
+      // Rate limit: 100ms between calls to avoid API throttling
+      await new Promise((r) => setTimeout(r, 100));
+    } catch {
+      failed++;
+    }
+  }
+
+  logger.info(`Backfill complete: ${processed} embedded, ${failed} failed`);
+  return { processed, failed };
+}
+
 // ---------------------------------------------------------------------------
 // Provider implementations (unified pattern)
 // ---------------------------------------------------------------------------

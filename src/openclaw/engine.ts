@@ -47,7 +47,7 @@ import {
   fitToTokenBudget,
   estimateTokens,
 } from "../config.js";
-import { enableVectorIndex } from "../core/embeddings.js";
+import { enableVectorIndex, backfillEmbeddings } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
 import { getScratchpad, updateScratchpad, clearScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
@@ -297,6 +297,8 @@ export function createEngine(
         try {
           await enableVectorIndex(embeddingConfig.dimension);
           vectorIndexEnabled = true;
+          // Backfill embeddings for existing memories (background, non-blocking)
+          backfillEmbeddings(embeddingConfig).catch(() => {});
         } catch {
           // Non-fatal — vector search degrades gracefully
         }
