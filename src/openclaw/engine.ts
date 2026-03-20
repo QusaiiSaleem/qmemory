@@ -326,7 +326,7 @@ export function createEngine(
       );
 
       if (existing && existing.length > 0) {
-        currentSessionId = existing[0].id;
+        currentSessionId = String(existing[0].id); // RecordId → string
         if (sharedState) sharedState.currentSessionId = currentSessionId;
         await query(
           "UPDATE $id SET last_active = time::now()",

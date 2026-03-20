@@ -73,3 +73,5 @@ LET $sid = "s17738514909907x0e"; CREATE type::record("tool_call", "tc_test2") CO
 SELECT * FROM tool_call ORDER BY created_at DESC LIMIT 5;
 SELECT id FROM session WHERE id = session:s1773854327386u242;
 LET $idPart = "tc_test3"; LET $sessionId = "s1773854327386u242"; CREATE type::record("tool_call", $idPart) CONTENT { session: type::record("session", $sessionId), tool_name: "exec", input_summary: "test", output_summary: "test", token_count: 5, created_at: time::now() };
+SELECT count() AS total, category FROM memory WHERE is_active = true GROUP BY category;
+SELECT count() AS c FROM tool_call GROUP ALL; SELECT count() AS c FROM scratchpad GROUP ALL; SELECT count() AS c FROM metrics GROUP ALL; SELECT count() AS c FROM memory WHERE is_active = true GROUP ALL; SELECT count() AS c FROM entity GROUP ALL; SELECT count() AS c FROM relates GROUP ALL;
