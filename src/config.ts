@@ -40,7 +40,7 @@ export const DEFAULT_CONFIG: QmemoryConfig = {
   embedding_provider: "none",
   embedding_model: "voyage-3",
   embedding_dimension: 1024,
-  linker_interval_ms: 300_000,    // 5 minutes
+  linker_interval_ms: 1_800_000,  // 30 minutes
   reflect_interval_ms: 1_800_000, // 30 minutes
   min_salience_recall: 0.3,
   debug: false,

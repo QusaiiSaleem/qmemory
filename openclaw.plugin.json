@@ -20,7 +20,7 @@
       "embedding_api_key": { "type": "string" },
       "embedding_model": { "type": "string" },
       "embedding_dimension": { "type": "integer", "default": 1024 },
-      "linker_interval_ms": { "type": "integer", "default": 300000 },
+      "linker_interval_ms": { "type": "integer", "default": 1800000 },
       "reflect_interval_ms": { "type": "integer", "default": 1800000 },
       "min_salience_recall": { "type": "number", "default": 0.3 },
       "debug": { "type": "boolean", "default": false }
