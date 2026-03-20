@@ -59,6 +59,13 @@ import type { ToolCall } from "../config.js";
 // Module-level logger — set by createEngine(), used by extractText()
 let moduleLogger: QmemoryLogger | null = null;
 
+/** Extract ID from string or RecordId: "session:s1234" → "s1234" */
+function sessionIdPart(fullId: unknown): string {
+  const str = String(fullId);
+  const idx = str.indexOf(":");
+  return idx >= 0 ? str.slice(idx + 1) : str;
+}
+
 // ---------------------------------------------------------------------------
 // Schema file path — resolved relative to this file's location
 // ---------------------------------------------------------------------------
@@ -387,7 +394,7 @@ export function createEngine(
       // Create message node
       await query(
         `CREATE $id CONTENT {
-          session: type::record($session),
+          session: type::record("session", $sessionId),
           role: $role,
           content: $content,
           tool_calls: $toolCalls,
@@ -397,7 +404,7 @@ export function createEngine(
         }`,
         {
           id: messageId,
-          session: currentSessionId,
+          sessionId: sessionIdPart(currentSessionId!),
           role: params.role,
           content: params.content,
           toolCalls: params.toolCalls ?? null,
@@ -515,10 +522,10 @@ export function createEngine(
           const ledgerBudget = Math.floor(memoryBudget * 0.05);
           const recentCalls = await query<ToolCall>(
             `SELECT * FROM tool_call
-             WHERE session = type::record($session)
+             WHERE session = type::record("session", $sessionId)
              ORDER BY created_at DESC
              LIMIT 20`,
-            { session: currentSessionId },
+            { sessionId: sessionIdPart(currentSessionId!) },
           );
           if (recentCalls && recentCalls.length > 0) {
             const rows = recentCalls.reverse().map((tc) => {
@@ -827,8 +834,8 @@ export function createEngine(
           if (currentSessionId) {
             try {
               await query(
-                "DELETE tool_call WHERE session = type::record($session)",
-                { session: currentSessionId },
+                'DELETE tool_call WHERE session = type::record("session", $sessionId)',
+                { sessionId: sessionIdPart(currentSessionId!) },
               );
               await clearScratchpad(currentSessionId);
               logger.debug("Emergency compaction: cleared tool_calls + scratchpad");
@@ -844,10 +851,10 @@ export function createEngine(
               // Keep only the 10 most recent tool calls
               const oldCalls = await query<{ id: string }>(
                 `SELECT id FROM tool_call
-                 WHERE session = type::record($session)
+                 WHERE session = type::record("session", $sessionId)
                  ORDER BY created_at DESC
                  LIMIT 1000 START 10`,
-                { session: currentSessionId },
+                { sessionId: sessionIdPart(currentSessionId!) },
               );
               if (oldCalls && oldCalls.length > 0) {
                 for (const call of oldCalls) {

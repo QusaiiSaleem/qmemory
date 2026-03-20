@@ -65,3 +65,11 @@ SELECT id, search::score(1) AS score, content FROM memory WHERE content @1@ 'Rai
 SELECT count() AS total FROM memory WHERE is_active = true GROUP ALL;
 SELECT count() AS total FROM session GROUP ALL;
 SELECT count() AS total FROM tool_call GROUP ALL;
+SELECT count() AS total FROM message GROUP ALL;
+SELECT id, session_key FROM session LIMIT 5;
+CREATE type::record("tool_call", "tc_test1") CONTENT {  session: type::record("session:s17738514909907x0e"),  tool_name: "test_tool",  input_summary: "test input",  output_summary: "test output",  token_count: 10,  created_at: time::now()};
+SELECT * FROM tool_call LIMIT 5;
+LET $sid = "s17738514909907x0e"; CREATE type::record("tool_call", "tc_test2") CONTENT { session: type::record("session", $sid), tool_name: "test2", input_summary: "t", output_summary: "t", token_count: 1, created_at: time::now() };
+SELECT * FROM tool_call ORDER BY created_at DESC LIMIT 5;
+SELECT id FROM session WHERE id = session:s1773854327386u242;
+LET $idPart = "tc_test3"; LET $sessionId = "s1773854327386u242"; CREATE type::record("tool_call", $idPart) CONTENT { session: type::record("session", $sessionId), tool_name: "exec", input_summary: "test", output_summary: "test", token_count: 5, created_at: time::now() };

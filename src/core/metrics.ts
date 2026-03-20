@@ -18,6 +18,13 @@
 import { query, generateId } from "../db/client.js";
 import type { MetricsSummary, QmemoryLogger } from "../config.js";
 
+/** Extract ID from string or RecordId: "session:s1234" → "s1234" */
+function sessionIdPart(fullId: unknown): string {
+  const str = String(fullId);
+  const idx = str.indexOf(":");
+  return idx >= 0 ? str.slice(idx + 1) : str;
+}
+
 let logger: QmemoryLogger | null = null;
 
 export function setMetricsLogger(l: QmemoryLogger): void {
@@ -39,21 +46,21 @@ export async function trackEvent(
     if (data !== undefined) {
       await query(
         `CREATE type::record("metrics", $idPart) CONTENT {
-          session: type::record($session),
+          session: type::record("session", $sessionId),
           event_type: $eventType,
           event_data: $eventData,
           created_at: time::now()
         }`,
-        { idPart, session: sessionId, eventType, eventData: data },
+        { idPart, sessionId: sessionIdPart(sessionId), eventType, eventData: data },
       );
     } else {
       await query(
         `CREATE type::record("metrics", $idPart) CONTENT {
-          session: type::record($session),
+          session: type::record("session", $sessionId),
           event_type: $eventType,
           created_at: time::now()
         }`,
-        { idPart, session: sessionId, eventType },
+        { idPart, sessionId: sessionIdPart(sessionId), eventType },
       );
     }
   } catch {
@@ -80,9 +87,9 @@ export async function getSessionMetrics(sessionId: string): Promise<MetricsSumma
     const rows = await query<{ event_type: string; total: number }>(
       `SELECT event_type, count() AS total
        FROM metrics
-       WHERE session = type::record($session)
+       WHERE session = type::record("session", $sessionId)
        GROUP BY event_type`,
-      { session: sessionId },
+      { sessionId: sessionIdPart(sessionId) },
     );
 
     if (!rows) return empty;

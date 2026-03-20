@@ -29,6 +29,17 @@ export interface SharedEngineState {
   currentSessionId: string | null;
 }
 
+/**
+ * Extract just the ID part from a SurrealDB record reference.
+ * Handles both strings ("session:s1234") and RecordId objects from the SDK.
+ * Returns just the ID part: "s1234abc"
+ */
+function sessionIdPart(fullId: unknown): string {
+  const str = String(fullId); // RecordId.toString() → "session:s1234"
+  const idx = str.indexOf(":");
+  return idx >= 0 ? str.slice(idx + 1) : str;
+}
+
 // ---------------------------------------------------------------------------
 // Summarization helpers (rule-based, no LLM needed)
 // ---------------------------------------------------------------------------
@@ -116,32 +127,45 @@ export function createAfterToolCallHandler(
       toolName: string;
     },
   ): Promise<void> => {
+    // Use console.error to bypass logger filtering — this MUST appear in logs
+    console.error(`[QMEMORY-HOOK-DIAG] after_tool_call FIRED: tool=${event.toolName} sessionId=${sharedState.currentSessionId ?? "NULL"}`);
+
     // Skip if no active session
-    if (!sharedState.currentSessionId) return;
+    if (!sharedState.currentSessionId) {
+      console.error(`[QMEMORY-HOOK-DIAG] SKIPPED — no session ID`);
+      return;
+    }
 
     try {
+      console.error(`[QMEMORY-HOOK-DIAG] step1: summarizing`);
       const inputSummary = summarizeInput(event.params);
       const outputSummary = event.error
         ? `ERROR: ${event.error.slice(0, 180)}`
         : summarizeOutput(event.result);
       const tokenCount = estimateTokens(outputSummary);
+      const sid = sessionIdPart(sharedState.currentSessionId);
 
+      console.error(`[QMEMORY-HOOK-DIAG] step2: building query (sid=${sid})`);
       const idPart = generateId("tc");
-      // Build params — omit duration_ms if undefined (SurrealDB 3.0 rejects NULL for option<int>)
       const params: Record<string, unknown> = {
         idPart,
-        session: sharedState.currentSessionId,
+        sessionId: sid,
         toolName: event.toolName,
         inputSummary,
         outputSummary,
         tokenCount,
       };
-      const durationField = event.durationMs !== undefined ? "duration_ms: $durationMs," : "";
-      if (event.durationMs !== undefined) params.durationMs = event.durationMs;
+      if (event.durationMs !== undefined) {
+        params.durationMs = event.durationMs;
+      }
 
-      await query(
+      // Build query — conditionally include duration_ms
+      const durationField = event.durationMs !== undefined ? "duration_ms: $durationMs," : "";
+
+      console.error(`[QMEMORY-HOOK-DIAG] step3: calling query()`);
+      const result = await query(
         `CREATE type::record("tool_call", $idPart) CONTENT {
-          session: type::record($session),
+          session: type::record("session", $sessionId),
           tool_name: $toolName,
           input_summary: $inputSummary,
           output_summary: $outputSummary,
@@ -151,14 +175,12 @@ export function createAfterToolCallHandler(
         }`,
         params,
       );
-
-      logger.info(`Tool ledger: ${event.toolName} (${event.durationMs ?? "?"}ms)`);
+      console.error(`[QMEMORY-HOOK-DIAG] step4: result=${result ? "OK" : "NULL"}`);
 
       // Track tool_call metric (fire-and-forget)
       trackEvent(sharedState.currentSessionId!, "tool_call", event.toolName).catch(() => {});
     } catch (error) {
-      // Fire-and-forget — never block the agent loop
-      logger.debug(`Tool ledger write failed: ${error}`);
+      console.error(`[QMEMORY-HOOK-DIAG] CATCH: ${error}`);
     }
   };
 }
