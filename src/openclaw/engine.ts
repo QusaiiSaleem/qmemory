@@ -186,6 +186,7 @@ function parseSessionKey(sessionKey: string): ParsedSessionKey {
 
 let schemaApplied = false;
 let vectorIndexEnabled = false;
+let backfillDone = false;
 
 // Graph map cache — avoid re-querying every assemble() turn
 const GRAPH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -297,11 +298,16 @@ export function createEngine(
         try {
           await enableVectorIndex(embeddingConfig.dimension);
           vectorIndexEnabled = true;
-          // Backfill embeddings for existing memories (background, non-blocking)
-          backfillEmbeddings(embeddingConfig).catch(() => {});
         } catch {
           // Non-fatal — vector search degrades gracefully
         }
+      }
+      // Backfill embeddings (separate from index — runs once per process)
+      if (!backfillDone && embeddingConfig && embeddingConfig.provider !== "none") {
+        backfillDone = true;
+        backfillEmbeddings(embeddingConfig).catch((e) => {
+          logger.debug(`Backfill error: ${e}`);
+        });
       }
 
       // Parse session key to extract topic/group/channel automatically
