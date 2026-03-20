@@ -74,6 +74,37 @@ function getSchemaPath(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Message content extractor
+// ---------------------------------------------------------------------------
+// OpenClaw messages use content blocks: [{type:"text",text:"..."}, ...]
+// NOT plain strings. This helper extracts the text safely.
+
+/**
+ * Extract plain text from an OpenClaw message's content field.
+ *
+ * OpenClaw uses the pi-ai message format where content is:
+ *   - string (rare, some user messages)
+ *   - array of content blocks: [{type:"text", text:"..."}, {type:"toolCall",...}]
+ *
+ * Without this helper, you'd get "[object Object]" from .toString() on the array.
+ */
+function extractText(content: unknown): string {
+  // Already a string — return as-is
+  if (typeof content === "string") return content;
+
+  // Array of content blocks — extract text from "text" blocks
+  if (Array.isArray(content)) {
+    return content
+      .filter((block: any) => block?.type === "text" && typeof block?.text === "string")
+      .map((block: any) => block.text)
+      .join("\n");
+  }
+
+  // Null/undefined/other — empty string
+  return "";
+}
+
+// ---------------------------------------------------------------------------
 // Session key parser — extracts topic/group/channel from OpenClaw session keys
 // Format: agent:<agentId>:<channel>:group:<groupId>:topic:<topicId>
 // ---------------------------------------------------------------------------
@@ -392,7 +423,7 @@ export function createEngine(
       // so we recall RELEVANT memories, not just top-salience ones
       const recentMessages = messages.slice(-6); // Last 3 turns (user + assistant)
       const conversationContext = recentMessages
-        .map((m: any) => m?.content ?? "")
+        .map((m: any) => extractText(m?.content))
         .filter((c: string) => c.length > 0)
         .join(" ")
         .slice(0, 500); // Cap to avoid huge queries
@@ -576,7 +607,7 @@ export function createEngine(
 
       // Estimate tokens for the current messages
       const messagesText = messages
-        .map((m: any) => m?.content ?? "")
+        .map((m: any) => extractText(m?.content))
         .join(" ");
       const estimatedTokens = estimateTokens(messagesText);
 
@@ -641,7 +672,7 @@ export function createEngine(
         id: "",
         session: "",
         role: m.role ?? "user",
-        content: m.content ?? "",
+        content: extractText(m?.content),
         token_count: 0,
         created_at: new Date().toISOString(),
       })) as import("../config.js").Message[];
@@ -711,7 +742,7 @@ export function createEngine(
       }
 
       const tokensAfter = estimateTokens(
-        freshMessages.map((m: any) => m?.content ?? "").join(" "),
+        freshMessages.map((m: any) => extractText(m?.content)).join(" "),
       );
 
       return {
@@ -758,7 +789,7 @@ export function createEngine(
           if (allExtractable.length > 0) {
             const msgArray = allExtractable.map((m: any) => ({
               id: "", session: "", role: m.role ?? "user",
-              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+              content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
               const facts = await extractMemories(msgArray, subagentRunner);
@@ -823,7 +854,7 @@ export function createEngine(
           if (extractableMessages.length > 0) {
             const msgArray = extractableMessages.map((m: any) => ({
               id: "", session: "", role: m.role ?? "user",
-              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+              content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
               const facts = await extractMemories(msgArray, subagentRunner);
@@ -857,7 +888,7 @@ export function createEngine(
           if (extractableMessages.length > 0) {
             const msgArray = extractableMessages.map((m: any) => ({
               id: "", session: "", role: m.role ?? "user",
-              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+              content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
               const facts = await extractMemories(msgArray, subagentRunner);
@@ -885,7 +916,7 @@ export function createEngine(
           if (oldMessages.length > 5) {
             const msgArray = oldMessages.map((m: any) => ({
               id: "", session: "", role: m.role ?? "user",
-              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+              content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
               const facts = await extractMemories(msgArray, subagentRunner);
@@ -916,12 +947,15 @@ export function createEngine(
       // Rate-limited: only every 5 turns after the first 5, to avoid expensive subagent calls
       if (currentSessionId && messages.length > 5 && messages.length % 5 === 0) {
         try {
-          // Find the last assistant message
-          const lastAssistant = [...messages].reverse().find(
+          // Find the last assistant message and extract its text
+          const lastAssistantMsg = [...messages].reverse().find(
             (m: any) => m?.role === "assistant" && m?.content,
-          ) as { content: string } | undefined;
+          );
+          const lastAssistantText = lastAssistantMsg
+            ? extractText((lastAssistantMsg as any).content)
+            : "";
 
-          if (lastAssistant && lastAssistant.content.length > 50) {
+          if (lastAssistantText.length > 50) {
             const extractionResult = await subagentRunner(
               `Analyze this assistant message and extract ONLY what's relevant as working memory.
 Return a JSON object with these fields (use "" for empty):
@@ -930,7 +964,7 @@ Return a JSON object with these fields (use "" for empty):
 - open_questions: Unresolved questions or next steps (1 sentence max)
 
 Message:
-${lastAssistant.content.slice(0, 1000)}
+${lastAssistantText.slice(0, 1000)}
 
 Respond ONLY with the JSON object, no markdown fencing.`,
             );
@@ -959,7 +993,7 @@ Respond ONLY with the JSON object, no markdown fencing.`,
       // Background: extract facts from the last few messages
       const recentMsgArray = messages.slice(-4).map((m: any) => ({
         id: "", session: "", role: m.role ?? "user",
-        content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+        content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
       })) as import("../config.js").Message[];
 
       // Skip very short messages
