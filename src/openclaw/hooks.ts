@@ -152,7 +152,7 @@ export function createAfterToolCallHandler(
         params,
       );
 
-      logger.debug(`Tool ledger: ${event.toolName} (${event.durationMs ?? "?"}ms)`);
+      logger.info(`Tool ledger: ${event.toolName} (${event.durationMs ?? "?"}ms)`);
 
       // Track tool_call metric (fire-and-forget)
       trackEvent(sharedState.currentSessionId!, "tool_call", event.toolName).catch(() => {});

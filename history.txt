@@ -62,3 +62,6 @@ SELECT count() AS without_embedding FROM memory WHERE embedding IS NONE AND is_a
 INFO FOR TABLE memory;
 SELECT id, search::score(1) AS score, content FROM memory WHERE content @1@ 'ركيزة' AND is_active = true ORDER BY score DESC LIMIT 3;
 SELECT id, search::score(1) AS score, content FROM memory WHERE content @1@ 'Railway' AND is_active = true ORDER BY score DESC LIMIT 3;
+SELECT count() AS total FROM memory WHERE is_active = true GROUP ALL;
+SELECT count() AS total FROM session GROUP ALL;
+SELECT count() AS total FROM tool_call GROUP ALL;

@@ -1072,12 +1072,15 @@ Respond ONLY with the JSON object, no markdown fencing.`,
     },
 
     // -----------------------------------------------------------------
-    // dispose() — Called when the session ends
-    // Disconnect from SurrealDB.
+    // dispose() — Called when an agent run ends
+    // Do NOT disconnect SurrealDB here — the connection is shared across
+    // all engine instances and must persist for the gateway's lifetime.
+    // OpenClaw creates/disposes engines per agent run, but the DB
+    // connection is process-level. Disconnecting here causes Bug 3
+    // (recall returns 0) because subsequent runs find db = null.
     // -----------------------------------------------------------------
     async dispose() {
-      logger.info("Disposing Qmemory engine");
-      await disconnect();
+      logger.debug("Engine dispose (connection kept alive)");
     },
   };
 }

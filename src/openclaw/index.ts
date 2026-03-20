@@ -144,8 +144,18 @@ export default function register(api: any): void {
   logger.info("Context engine registered");
 
   // 9. Register lifecycle hooks
-  api.on("after_tool_call", createAfterToolCallHandler(logger, sharedState));
-  api.on("tool_result_persist", createToolResultPersistHandler(logger));
+  try {
+    api.on("after_tool_call", createAfterToolCallHandler(logger, sharedState));
+    logger.info("Hook registered: after_tool_call");
+  } catch (hookErr) {
+    logger.error(`Failed to register after_tool_call hook: ${hookErr}`);
+  }
+  try {
+    api.on("tool_result_persist", createToolResultPersistHandler(logger));
+    logger.info("Hook registered: tool_result_persist");
+  } catch (hookErr) {
+    logger.error(`Failed to register tool_result_persist hook: ${hookErr}`);
+  }
 
   // ----- TOOLS -----
 
