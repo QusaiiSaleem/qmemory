@@ -3,7 +3,7 @@
 ## Plugin Entry (add to community plugins page)
 
 ```markdown
-* **Qmemory** — Graph memory context engine powered by SurrealDB. Replaces LCM with cross-session intelligence: 4-tier hybrid recall (graph + BM25 + vector + recent), LLM-driven dedup, salience scoring, temporal validity, dynamic relationship graphs, people/contact management, and interactive graph viewer. Also works as standalone MCP server for Claude Code and Claude.ai.
+* **Qmemory** — Graph memory context engine plugin powered by SurrealDB. Adds cross-session intelligence: 4-tier hybrid recall (graph + BM25 + vector + recent), LLM-driven dedup, salience scoring, temporal validity, dynamic relationship graphs, people/contact management, and interactive graph viewer. Also works as standalone MCP server for Claude Code and Claude.ai.
   npm: `qmemory`
   repo: `https://github.com/QusaiiSaleem/qmemory`
   install: `openclaw plugins install qmemory`
@@ -22,11 +22,11 @@ Add Qmemory — graph memory context engine (SurrealDB)
 - **GitHub**: https://github.com/QusaiiSaleem/qmemory
 - **Install**: `openclaw plugins install qmemory`
 - **License**: MIT
-- **Kind**: `context-engine` (replaces LCM)
+- **Kind**: `context-engine`
 
 ### What It Does
 
-Qmemory gives OpenClaw agents persistent, cross-session graph memory powered by SurrealDB. It replaces LCM (Lossless Claw) as the context engine, solving 6 architectural gaps in OpenClaw's session-scoped memory:
+Qmemory is an OpenClaw context-engine plugin that gives agents persistent, cross-session graph memory powered by SurrealDB. It implements the full `ContextEngine` interface (`bootstrap`, `ingest`, `assemble`, `compact`, `afterTurn`) and addresses 6 gaps in session-scoped memory:
 
 1. **Cross-session recall** — memories from Topic A appear in Topic B
 2. **Automatic extraction** — facts extracted from every conversation (no manual MEMORY.md)

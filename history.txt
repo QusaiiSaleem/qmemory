@@ -11,3 +11,54 @@ SELECT category, count() AS count FROM memory WHERE is_active = true GROUP BY ca
 -- The 1 relationship that exists
 SELECT * FROM relates;
 -- Check for duplicates (same content appearing multiple times)
+DELETE memory;
+DELETE entity;
+DELETE relates;
+DELETE session;
+DELETE has_message;
+DELETE extracted_from;
+DELETE prev_version;
+DELETE message;
+SELECT count() AS count FROM memory GROUP ALL;
+SELECT count() AS count FROM entity GROUP ALL;
+SELECT count() AS count FROM relates GROUP ALL;
+SELECT count() AS count FROM memory WHERE is_active = true GROUP ALL;
+SELECT count() AS count FROM entity GROUP ALL;
+SELECT count() AS count FROM relates GROUP ALL;
+SELECT count() AS count FROM session GROUP ALL;
+SELECT count() AS count FROM memory WHERE is_active = true GROUP ALL;
+SELECT count() AS count FROM entity GROUP ALL;
+SELECT count() AS count FROM relates GROUP ALL;
+SELECT count() AS count FROM session GROUP ALL;
+SELECT count() AS count FROM message GROUP ALL;
+SELECT id, content, category, salience FROM memory WHERE is_active = true LIMIT 5;
+SELECT id, type, reason FROM relates LIMIT 5;
+-- Test: string ID (what we're doing now — FAILS)
+CREATE "session:test1" CONTENT { test: true };
+-- Test: proper record ID syntax (should WORK)
+CREATE session:test2 CONTENT { test: true };
+SELECT * FROM session:test2;
+DELETE session:test2;
+-- Test: record ID as param
+CREATE session:test3 CONTENT { test: true, session_key: "test", channel: "test", chat_type: "dm", scope: "global", last_active: time::now(), created_at: time::now() };
+SELECT * FROM session:test3;
+DELETE session:test3;
+SELECT count() AS count FROM session GROUP ALL;
+SELECT id, session_key, channel FROM session LIMIT 3;
+CREATE type::record("session", "testfix") CONTENT { session_key: "test", channel: "test", chat_type: "dm", scope: "global", last_active: time::now(), created_at: time::now() };
+SELECT * FROM session LIMIT 1;
+DELETE session:testfix;
+SELECT count() AS count FROM session GROUP ALL;
+-- 1. Check if any memories have embeddings
+SELECT count() AS total FROM memory WHERE embedding IS NOT NONE GROUP ALL;
+SELECT count() AS without FROM memory WHERE embedding IS NONE AND is_active = true GROUP ALL;
+-- 2. Test BM25 text search
+SELECT id, content, search::score(1) AS score FROM memory WHERE content @1@ 'ركيزة' ORDER BY score DESC LIMIT 3;
+-- Check if vector index exists
+INFO FOR TABLE memory;
+SELECT id, content, search::score(1) AS score FROM memory WHERE content @1@ 'ركيزة' AND is_active = true ORDER BY score DESC LIMIT 3;
+SELECT count() AS with_embedding FROM memory WHERE embedding IS NOT NONE GROUP ALL;
+SELECT count() AS without_embedding FROM memory WHERE embedding IS NONE AND is_active = true GROUP ALL;
+INFO FOR TABLE memory;
+SELECT id, search::score(1) AS score, content FROM memory WHERE content @1@ 'ركيزة' AND is_active = true ORDER BY score DESC LIMIT 3;
+SELECT id, search::score(1) AS score, content FROM memory WHERE content @1@ 'Railway' AND is_active = true ORDER BY score DESC LIMIT 3;

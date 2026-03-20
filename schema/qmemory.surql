@@ -132,3 +132,46 @@ DEFINE FIELD IF NOT EXISTS created_at ON relates TYPE datetime      DEFAULT time
 
 DEFINE INDEX IF NOT EXISTS idx_relates_type ON relates FIELDS type;
 DEFINE INDEX IF NOT EXISTS idx_relates_created_by ON relates FIELDS created_by;
+
+-- ============================================================
+-- NODE: tool_call (tool call ledger)
+-- ============================================================
+
+DEFINE TABLE IF NOT EXISTS tool_call SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS session        ON tool_call TYPE record<session>;
+DEFINE FIELD IF NOT EXISTS tool_name      ON tool_call TYPE string;
+DEFINE FIELD IF NOT EXISTS input_summary  ON tool_call TYPE string;
+DEFINE FIELD IF NOT EXISTS output_summary ON tool_call TYPE string;
+DEFINE FIELD IF NOT EXISTS duration_ms    ON tool_call TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS token_count    ON tool_call TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS created_at     ON tool_call TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_tool_call_session ON tool_call FIELDS session;
+DEFINE INDEX IF NOT EXISTS idx_tool_call_name ON tool_call FIELDS tool_name;
+
+-- ============================================================
+-- NODE: scratchpad (session working memory)
+-- ============================================================
+
+DEFINE TABLE IF NOT EXISTS scratchpad SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS session        ON scratchpad TYPE record<session>;
+DEFINE FIELD IF NOT EXISTS task_progress  ON scratchpad TYPE string DEFAULT "";
+DEFINE FIELD IF NOT EXISTS key_findings   ON scratchpad TYPE string DEFAULT "";
+DEFINE FIELD IF NOT EXISTS open_questions ON scratchpad TYPE string DEFAULT "";
+DEFINE FIELD IF NOT EXISTS tool_summary   ON scratchpad TYPE string DEFAULT "";
+DEFINE FIELD IF NOT EXISTS updated_at     ON scratchpad TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_scratchpad_session ON scratchpad FIELDS session UNIQUE;
+
+-- ============================================================
+-- NODE: metrics (event tracking)
+-- ============================================================
+
+DEFINE TABLE IF NOT EXISTS metrics SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS session        ON metrics TYPE record<session>;
+DEFINE FIELD IF NOT EXISTS event_type     ON metrics TYPE string;
+DEFINE FIELD IF NOT EXISTS event_data     ON metrics TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at     ON metrics TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_metrics_session ON metrics FIELDS session;
+DEFINE INDEX IF NOT EXISTS idx_metrics_type ON metrics FIELDS event_type;

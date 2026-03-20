@@ -144,6 +144,58 @@ export const CONTACT_SOURCES = [
 export type ContactSource = typeof CONTACT_SOURCES[number];
 
 // ---------------------------------------------------------------------------
+// Tool call ledger
+// ---------------------------------------------------------------------------
+
+export interface ToolCall {
+  id: string;              // tool_call:xxx
+  session: string;         // FK → session:xxx
+  tool_name: string;
+  input_summary: string;
+  output_summary: string;
+  duration_ms?: number;
+  token_count: number;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Session scratchpad (working memory)
+// ---------------------------------------------------------------------------
+
+export interface Scratchpad {
+  id: string;              // scratchpad:xxx
+  session: string;         // FK → session:xxx
+  task_progress: string;
+  key_findings: string;
+  open_questions: string;
+  tool_summary: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Metrics tracking
+// ---------------------------------------------------------------------------
+
+export interface MetricsEvent {
+  id: string;              // metrics:xxx
+  session: string;         // FK → session:xxx
+  event_type: string;
+  event_data?: string;
+  created_at: string;
+}
+
+export interface MetricsSummary {
+  recall_hits: number;
+  recall_misses: number;
+  dedup_adds: number;
+  dedup_updates: number;
+  dedup_noops: number;
+  tool_calls: number;
+  compactions: number;
+  extractions: number;
+}
+
+// ---------------------------------------------------------------------------
 // Edge types
 // ---------------------------------------------------------------------------
 

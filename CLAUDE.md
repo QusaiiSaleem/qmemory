@@ -1,6 +1,6 @@
 # Qmemory
 
-Graph memory context engine for OpenClaw (replaces LCM) + MCP server for Claude Code/Claude.ai. Powered by SurrealDB.
+Graph memory context engine plugin for OpenClaw + MCP server for Claude Code/Claude.ai. Powered by SurrealDB.
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ surreal sql -e http://localhost:8000 -u root -p root --namespace qmemory --datab
 src/
 ├── core/           ← SHARED logic (recall, save, search, correct, link, extract, dedup, embeddings, migrate)
 ├── db/             ← SurrealDB connection + parameterized queries
-├── openclaw/       ← ENTRY 1: Context engine plugin (replaces LCM) + 6 tools + linker service
+├── openclaw/       ← ENTRY 1: Context engine plugin + 6 tools + linker service
 ├── mcp/            ← ENTRY 2: FastMCP server (4 tools for Claude Code/Claude.ai)
 ├── cli.ts          ← ENTRY 3: CLI (npx qmemory serve|serve-http|status|schema)
 ├── config.ts       ← All types, constants, formatMemories()

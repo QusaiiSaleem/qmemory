@@ -31,6 +31,7 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
     "fastmcp": "^1.27.3",
+    "qmemory": "^0.1.2",
     "surrealdb": "2.0.3",
     "zod": "^3.24.4"
   },

@@ -2,7 +2,7 @@
  * Qmemory Context Engine
  *
  * Implements the full OpenClaw ContextEngine interface.
- * This is what OpenClaw calls instead of LCM for every session lifecycle event:
+ * OpenClaw calls these methods for every session lifecycle event:
  *
  *   bootstrap → ingest → assemble → compact → afterTurn → dispose
  *

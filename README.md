@@ -8,12 +8,12 @@
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-context--engine-ff6b35)](https://github.com/openclaw)
 [![MCP Compatible](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-00a67e)](https://modelcontextprotocol.io)
 
-> **What it is:** A graph-based memory layer that gives AI agents persistent, cross-session intelligence. Every fact is a node. Every relationship is an edge. Nothing is forgotten.
+> **What it is:** A graph-based context engine that gives AI agents persistent, cross-session intelligence. Every fact is a node. Every relationship is an edge. Nothing is forgotten.
 >
-> **What it replaces:** The default flat-file memory in OpenClaw (LCM), or the "no memory at all" problem in Claude Code and Claude.ai.
+> **Why it exists:** The built-in context engine stores memories as flat files with no cross-session recall. Qmemory plugs into the same context-engine slot and adds graph relationships, salience scoring, temporal validity, and 4-tier hybrid search — so your agent remembers across sessions, topics, and channels.
 >
 > **Three ways to use it:**
-> 1. 🔌 **OpenClaw context engine** — deepest integration, replaces LCM entirely
+> 1. 🔌 **OpenClaw context engine** — deepest integration, full session lifecycle management
 > 2. 🖥️ **MCP server for Claude Code** — stdio transport, add to `~/.claude.json`
 > 3. 🌐 **MCP server for Claude.ai** — HTTP transport, connect via remote MCP
 
@@ -81,13 +81,13 @@ Every AI agent session is an island. Your agent learns things in one conversatio
 
 **The result?** You repeat yourself. The agent asks the same questions. Decisions made in Topic 7 are invisible in Topic 9. Your cron jobs operate without context. Subagents start from scratch every time.
 
-This is how **every** AI assistant works by default — including OpenClaw's built-in LCM (which uses flat markdown files with no cross-session recall).
+This is how **every** AI assistant works by default — including OpenClaw's built-in context engine (which uses flat markdown files with no cross-session recall).
 
 ---
 
 ## ✨ The Solution
 
-Qmemory replaces the filing cabinet with a **connected graph**. Every fact, every decision, every preference becomes a node — and they're all connected through typed relationships.
+Qmemory turns the filing cabinet into a **connected graph**. Every fact, every decision, every preference becomes a node — and they're all connected through typed relationships.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -269,31 +269,31 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 
 ## 📊 Comparison with Other Solutions
 
-| Feature | **Qmemory** | OpenClaw Built-in (LCM) | LCM (Legacy) | Mem0 | LanceDB-pro | Hindsight |
-|---|---|---|---|---|---|---|
-| **Storage** | SurrealDB graph | Flat markdown files | Flat markdown | Managed cloud | LanceDB (vector) | Custom graph |
-| **Cross-session recall** | ✅ 4-tier hybrid | ❌ Same-session only | ❌ Same-session only | ✅ Vector search | ✅ Vector search | ✅ Graph + vector |
-| **Graph relationships** | ✅ Dynamic (any type) | ❌ None | ❌ None | ❌ None | ❌ None | ✅ Fixed types |
-| **Deduplication** | ✅ LLM-driven | ❌ None | ❌ None | ✅ Rule-based | ❌ None | ✅ LLM-driven |
-| **Salience scoring** | ✅ 0.0–1.0 | ❌ No ranking | ❌ No ranking | ❌ No scoring | ❌ No scoring | ✅ Importance |
-| **Temporal validity** | ✅ valid_from/until | ❌ No expiry | ❌ No expiry | ❌ No expiry | ❌ No expiry | ✅ Time-aware |
-| **Background linking** | ✅ Every 5 min | ❌ None | ❌ None | ❌ None | ❌ None | ✅ Periodic |
-| **Reflection/synthesis** | ✅ Every 30 min | ❌ None | ❌ None | ❌ None | ❌ None | ✅ Periodic |
-| **Version history** | ✅ prev_version chain | ❌ Overwrite | ❌ Overwrite | ❌ Overwrite | ❌ Overwrite | ✅ Versioned |
-| **External references** | ✅ Email, tasks, etc. | ❌ None | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Self-hosted** | ✅ SurrealDB local | ✅ Local files | ✅ Local files | ❌ Cloud only | ✅ Local | ❌ Cloud only |
-| **OpenClaw integration** | ✅ Context engine | ✅ Built-in | ✅ Built-in | ❌ MCP only | ❌ MCP only | ❌ Not compatible |
-| **MCP support** | ✅ stdio + HTTP | ❌ None | ❌ None | ✅ stdio | ✅ stdio | ❌ None |
-| **LongMemEval accuracy** | — (pending) | ~40% | ~40% | ~65% | ~60% | **91.4%** (highest) |
-| **Dependencies** | 2 (`surrealdb`, `fastmcp`) | 0 (built-in) | 0 (built-in) | Managed service | 1 (`lancedb`) | Managed service |
-| **License** | MIT | MIT | MIT | Proprietary | Apache 2.0 | Proprietary |
-| **Price** | Free | Free | Free | $$$$ | Free | $$$$ |
+| Feature | **Qmemory** | OpenClaw Built-in | Mem0 | LanceDB-pro | Hindsight |
+|---|---|---|---|---|---|
+| **Storage** | SurrealDB graph | Flat markdown files | Managed cloud | LanceDB (vector) | Custom graph |
+| **Cross-session recall** | ✅ 4-tier hybrid | ❌ Same-session only | ✅ Vector search | ✅ Vector search | ✅ Graph + vector |
+| **Graph relationships** | ✅ Dynamic (any type) | ❌ None | ❌ None | ❌ None | ✅ Fixed types |
+| **Deduplication** | ✅ LLM-driven | ❌ None | ✅ Rule-based | ❌ None | ✅ LLM-driven |
+| **Salience scoring** | ✅ 0.0–1.0 | ❌ No ranking | ❌ No scoring | ❌ No scoring | ✅ Importance |
+| **Temporal validity** | ✅ valid_from/until | ❌ No expiry | ❌ No expiry | ❌ No expiry | ✅ Time-aware |
+| **Background linking** | ✅ Every 5 min | ❌ None | ❌ None | ❌ None | ✅ Periodic |
+| **Reflection/synthesis** | ✅ Every 30 min | ❌ None | ❌ None | ❌ None | ✅ Periodic |
+| **Version history** | ✅ prev_version chain | ❌ Overwrite | ❌ Overwrite | ❌ Overwrite | ✅ Versioned |
+| **External references** | ✅ Email, tasks, etc. | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Self-hosted** | ✅ SurrealDB local | ✅ Local files | ❌ Cloud only | ✅ Local | ❌ Cloud only |
+| **OpenClaw integration** | ✅ Context engine plugin | ✅ Built-in | ❌ MCP only | ❌ MCP only | ❌ Not compatible |
+| **MCP support** | ✅ stdio + HTTP | ❌ None | ✅ stdio | ✅ stdio | ❌ None |
+| **LongMemEval accuracy** | — (pending) | ~40% | ~65% | ~60% | **91.4%** (highest) |
+| **Dependencies** | 2 (`surrealdb`, `fastmcp`) | 0 (built-in) | Managed service | 1 (`lancedb`) | Managed service |
+| **License** | MIT | MIT | Proprietary | Apache 2.0 | Proprietary |
+| **Price** | Free | Free | $$$$ | Free | $$$$ |
 
 **Why Qmemory over the others?**
-- vs **LCM/Built-in**: Qmemory adds cross-session recall, graph relationships, salience, and temporal validity — LCM just writes flat files
+- vs **Built-in**: Qmemory plugs into the same context-engine slot and adds cross-session recall, graph relationships, salience, and temporal validity — the built-in default stores flat files per session
 - vs **Mem0**: Qmemory is self-hosted, graph-based, and integrates as a full context engine — Mem0 is cloud-only vector search
 - vs **LanceDB-pro**: Qmemory has typed relationships and dedup — LanceDB is pure vector with no graph intelligence
-- vs **Hindsight**: Comparable features, but Qmemory is open-source, self-hosted, and runs as an OpenClaw plugin — Hindsight is proprietary cloud
+- vs **Hindsight**: Comparable features, but Qmemory is open-source, self-hosted, and runs as an OpenClaw context-engine plugin — Hindsight is proprietary cloud
 
 ---
 
@@ -306,7 +306,7 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 
 ### Option 1: OpenClaw Plugin (Full Power) 🔌
 
-This is the deepest integration. Qmemory replaces LCM entirely and manages the full session lifecycle.
+This is the deepest integration. Qmemory registers as a context-engine plugin and manages the full session lifecycle.
 
 **Step 1: Install SurrealDB 3.0+**
 

@@ -1,7 +1,7 @@
 /**
  * Qmemory — OpenClaw Plugin Entry Point
  *
- * Registers Qmemory as a context engine (replaces LCM),
+ * Registers Qmemory as a context-engine plugin,
  * plus 4 agent tools, a background linker service,
  * and an HTTP route for the graph viewer.
  *
@@ -132,7 +132,7 @@ export default function register(api: any): void {
     );
   }
 
-  // 7. Register the context engine (replaces LCM)
+  // 7. Register the context engine
   const engine = createEngine(config, logger, subagentRunner, openclawConfig, embeddingConfig);
   api.registerContextEngine("qmemory", () => engine);
 
