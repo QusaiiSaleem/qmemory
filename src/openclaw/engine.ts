@@ -51,6 +51,7 @@ import { enableVectorIndex } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
 import { getScratchpad, updateScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
+import { trackEvent, setMetricsLogger } from "../core/metrics.js";
 import type { SubagentRunner } from "./index.js";
 import type { SharedEngineState } from "./hooks.js";
 import type { ToolCall } from "../config.js";
@@ -163,6 +164,7 @@ export function createEngine(
   // Set the logger on the DB client and core modules
   setLogger(logger);
   setScratchpadLogger(logger);
+  setMetricsLogger(logger);
 
   return {
     // ----- Engine metadata -----
@@ -441,6 +443,15 @@ export function createEngine(
         logger.warn(`Recall failed (non-fatal): ${error}`);
       }
 
+      // Track recall metrics (fire-and-forget)
+      if (currentSessionId) {
+        if (memories.length > 0) {
+          trackEvent(currentSessionId, "recall_hit", String(memories.length)).catch(() => {});
+        } else {
+          trackEvent(currentSessionId, "recall_miss").catch(() => {});
+        }
+      }
+
       // Fit to token budget: 60% memories, 40% graph map
       const isFirstAssemble = !hasShownToolsGuide;
       const memBudget = Math.floor(memoryBudget * 0.6);
@@ -670,6 +681,14 @@ export function createEngine(
         `Compaction: extracted ${extractedFacts.length} facts, saved ${savedCount}`,
       );
 
+      // Track compaction + extraction metrics (fire-and-forget)
+      if (currentSessionId) {
+        trackEvent(currentSessionId, "compaction", "compact").catch(() => {});
+        if (extractedFacts.length > 0) {
+          trackEvent(currentSessionId, "extraction", String(extractedFacts.length)).catch(() => {});
+        }
+      }
+
       // Re-inject high-salience memories into a summary
       // This prevents "post-compaction amnesia" (OpenClaw #19148)
       let summary = `[Compacted ${oldMessages.length} messages into ${savedCount} memories]`;
@@ -751,6 +770,10 @@ export function createEngine(
                 );
               }
               logger.info(`Emergency compaction: saved ${facts.length} facts from all messages`);
+              if (currentSessionId) {
+                trackEvent(currentSessionId, "compaction", "4").catch(() => {});
+                trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
+              }
             } catch (error) {
               logger.warn(`Emergency compaction failed: ${error}`);
             }
@@ -808,6 +831,10 @@ export function createEngine(
                 );
               }
               logger.info(`Heavy compaction: saved ${facts.length} facts`);
+              if (currentSessionId) {
+                trackEvent(currentSessionId, "compaction", "3").catch(() => {});
+                trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
+              }
             } catch (error) {
               logger.warn(`Heavy compaction extraction failed: ${error}`);
             }
@@ -838,6 +865,10 @@ export function createEngine(
                 );
               }
               logger.info(`Pre-compaction flush: saved ${facts.length} facts`);
+              if (currentSessionId) {
+                trackEvent(currentSessionId, "compaction", "2").catch(() => {});
+                trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
+              }
             } catch (error) {
               logger.warn(`Pre-compaction flush failed: ${error}`);
             }
@@ -864,6 +895,10 @@ export function createEngine(
               }
               if (facts.length > 0) {
                 logger.debug(`Light compaction: saved ${facts.length} facts`);
+                if (currentSessionId) {
+                  trackEvent(currentSessionId, "compaction", "1").catch(() => {});
+                  trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
+                }
               }
             } catch (error) {
               logger.debug(`Light compaction failed: ${error}`);
@@ -939,6 +974,9 @@ Respond ONLY with the JSON object, no markdown fencing.`,
         if (facts.length > 0) {
           graphMapCache = null; // Invalidate graph cache
           logger.debug(`afterTurn: extracted ${facts.length} facts`);
+          if (currentSessionId) {
+            trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
+          }
         }
       } catch (error) {
         logger.warn(`afterTurn extraction failed: ${error}`);

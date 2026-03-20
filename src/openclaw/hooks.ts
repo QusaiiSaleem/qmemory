@@ -11,6 +11,7 @@
 
 import { query, generateId } from "../db/client.js";
 import { estimateTokens } from "../config.js";
+import { trackEvent } from "../core/metrics.js";
 import type { QmemoryLogger } from "../config.js";
 
 // ---------------------------------------------------------------------------

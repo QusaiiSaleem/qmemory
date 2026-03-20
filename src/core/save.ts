@@ -25,6 +25,7 @@ import type {
   DedupAction,
   QmemoryLogger,
 } from "../config.js";
+import { trackEvent } from "./metrics.js";
 import type { SubagentRunner } from "./dedup.js";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,8 @@ export interface SaveParams {
   salience?: number;
   scope?: string;
   source_type?: Memory["source_type"];
+  /** Session ID for metrics tracking (optional, fire-and-forget) */
+  sessionId?: string;
 }
 
 export interface SaveResult {
@@ -91,6 +94,12 @@ export async function saveMemory(
   logger.info(`Save: dedup decision = ${decision.action} (confidence: ${decision.confidence})`);
 
   // --- Step 3: Execute the decision ---
+
+  // Track dedup decision (fire-and-forget)
+  if (params.sessionId) {
+    const eventMap: Record<string, string> = { ADD: "dedup_add", UPDATE: "dedup_update", NOOP: "dedup_noop" };
+    trackEvent(params.sessionId, eventMap[decision.action] ?? "dedup_add").catch(() => {});
+  }
 
   if (decision.action === "NOOP") {
     // Already known — return the existing memory ID
