@@ -348,13 +348,17 @@ openclaw config set plugins.slots.contextEngine "qmemory"
 
 **Step 4: Enable plugin tools**
 
-The `coding` tool profile only includes core tools by default. You must add `group:plugins` to make Qmemory's tools visible to the agent:
+The `coding` tool profile only includes core tools by default. Choose one:
 
 ```bash
+# Minimal — only Qmemory tools
+openclaw config set tools.alsoAllow '["qmemory"]'
+
+# Recommended — all plugin tools (if you have other plugins too)
 openclaw config set tools.alsoAllow '["group:plugins"]'
 ```
 
-> **Without this step, Qmemory's 6 tools will not appear in the agent's tool list.** The plugin will load and inject memories, but the agent cannot save, search, correct, or link memories on its own.
+> **Without this step, Qmemory's 6 tools will not appear in the agent's tool list.** `"group:plugins"` is recommended because it lets the agent use tools from ALL installed plugins — useful when Qmemory works alongside other plugins in group chats and topics.
 
 **Step 5: (Optional) Configure the plugin**
 
