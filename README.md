@@ -195,7 +195,7 @@ _5 memories recalled, sorted by importance_
 
 ### The Graph Schema
 
-Qmemory's brain is a graph with **4 node types** and **4 edge types**:
+Qmemory's brain is a graph with **7 table types** and **5 edge types**:
 
 ```
   ┌──────────┐                ┌──────────┐
@@ -220,7 +220,7 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
   │  _url    │                │ embedding│
   └──────────┘                └──────────┘
 
-  4 nodes: session, message, memory, entity
+  7 tables: session, message, memory, entity, tool_call, scratchpad, metrics
   3 structural edges: has_message, extracted_from, prev_version (auto-created)
   1 dynamic edge: relates (agent creates ANY relationship type)
 ```
@@ -246,7 +246,10 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 ### Graph Intelligence
 - **Dynamic relationships** — the agent creates ANY edge type between any two nodes (`supports`, `contradicts`, `blocks`, etc.)
 - **Background linker** (every 5 min) — finds unlinked memories, asks the LLM to discover relationships, creates edges
+- **Salience decay** (every 5 min) — memories older than 7 days get salience *= 0.95 (floor 0.1), so old facts naturally fade unless recalled
 - **Background reflect** (every 30 min) — synthesizes insights across memories, resolves contradictions (inspired by Hindsight)
+- **Auto graph structure** — channel/topic/session hierarchy built automatically on bootstrap (no agent action needed)
+- **12 lifecycle hooks** — captures tool calls, cron outcomes, token usage, subagent relationships, sender identity, delivery routing, session lifecycle
 - **Entity extraction** — people, projects, orgs, concepts, and systems become first-class graph nodes
 
 ### OpenClaw Deep Integration
@@ -275,7 +278,7 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 | **Cross-session recall** | ✅ 4-tier hybrid | ❌ Same-session only | ✅ Vector search | ✅ Vector search | ✅ Graph + vector |
 | **Graph relationships** | ✅ Dynamic (any type) | ❌ None | ❌ None | ❌ None | ✅ Fixed types |
 | **Deduplication** | ✅ LLM-driven | ❌ None | ✅ Rule-based | ❌ None | ✅ LLM-driven |
-| **Salience scoring** | ✅ 0.0–1.0 | ❌ No ranking | ❌ No scoring | ❌ No scoring | ✅ Importance |
+| **Salience scoring** | ✅ 0.0–1.0 + decay | ❌ No ranking | ❌ No scoring | ❌ No scoring | ✅ Importance |
 | **Temporal validity** | ✅ valid_from/until | ❌ No expiry | ❌ No expiry | ❌ No expiry | ✅ Time-aware |
 | **Background linking** | ✅ Every 5 min | ❌ None | ❌ None | ❌ None | ✅ Periodic |
 | **Reflection/synthesis** | ✅ Every 30 min | ❌ None | ❌ None | ❌ None | ✅ Periodic |
@@ -285,7 +288,7 @@ Qmemory's brain is a graph with **4 node types** and **4 edge types**:
 | **OpenClaw integration** | ✅ Context engine plugin | ✅ Built-in | ❌ MCP only | ❌ MCP only | ❌ Not compatible |
 | **MCP support** | ✅ stdio + HTTP | ❌ None | ✅ stdio | ✅ stdio | ❌ None |
 | **LongMemEval accuracy** | — (pending) | ~40% | ~65% | ~60% | **91.4%** (highest) |
-| **Dependencies** | 2 (`surrealdb`, `fastmcp`) | 0 (built-in) | Managed service | 1 (`lancedb`) | Managed service |
+| **Dependencies** | 4 (`surrealdb`, `fastmcp`, `typebox`, `zod`) | 0 (built-in) | Managed service | 1 (`lancedb`) | Managed service |
 | **License** | MIT | MIT | Proprietary | Apache 2.0 | Proprietary |
 | **Price** | Free | Free | $$$$ | Free | $$$$ |
 
@@ -533,11 +536,11 @@ When running as a standalone MCP server, configure via environment variables:
 
 ## 🔧 Tools Reference
 
-Qmemory exposes **5 tools** in OpenClaw mode and **4 tools** in MCP mode.
+Qmemory exposes **6 tools** in OpenClaw mode and **4 tools** in MCP mode.
 
 ### `qmemory_search`
 
-Search cross-session memory by meaning, category, or scope.
+Search cross-session memory AND tool call history.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -545,10 +548,14 @@ Search cross-session memory by meaning, category, or scope.
 | `categories` | string[] | No | Filter: `style`, `preference`, `context`, `decision`, `idea`, `feedback`, `domain` |
 | `scope` | string | No | Filter: `global`, `project:xxx`, `topic:xxx` |
 | `limit` | number | No | Max results, 1–50 (default: 10) |
+| `include_tool_calls` | boolean | No | Also search the `tool_call` table across all sessions |
+| `tool_name` | string | No | Filter tool calls by name (e.g., `"exec"`, `"qmemory_save"`) |
 
-**Example:**
+**Examples:**
 ```
 qmemory_search({ query: "Railway deployment", categories: ["context", "decision"], limit: 5 })
+qmemory_search({ include_tool_calls: true, tool_name: "exec" })
+qmemory_search({ query: "Railway", include_tool_calls: true })
 ```
 
 **Returns:**
@@ -1239,13 +1246,14 @@ src/
 
 ### Dependencies
 
-Only **3 runtime dependencies** — keeping it simple:
+Only **4 runtime dependencies** — keeping it simple:
 
 | Package | Why |
 |---|---|
 | `surrealdb` | Official SurrealDB JavaScript SDK |
 | `fastmcp` | MCP server framework (stdio + HTTP transports) |
-| `zod` | Schema validation for MCP tool parameters |
+| `@sinclair/typebox` | OpenClaw tool parameter schemas |
+| `zod` | MCP tool parameter schemas |
 
 ---
 
@@ -1335,7 +1343,7 @@ These are NOT fixed — use **any word** that describes the relationship.
 |---|---|---|
 | [**SKILL.md**](SKILL.md) | Agent guide — teaches AI agents when/how to save, search, link, correct, and manage memory | Setting up a new agent, customizing memory behavior |
 | [**CLAUDE.md**](CLAUDE.md) | Developer reference — architecture, key patterns, gotchas, quick commands | Contributing to Qmemory, debugging, understanding the codebase |
-| [**schema/qmemory.surql**](schema/qmemory.surql) | Full SurrealDB schema — all 4 node types, 4 edge types, indexes, analyzers | Understanding the data model, writing custom queries |
+| [**schema/qmemory.surql**](schema/qmemory.surql) | Full SurrealDB schema — 7 tables, 5 edge types, indexes, analyzers | Understanding the data model, writing custom queries |
 | [**openclaw.plugin.json**](openclaw.plugin.json) | Plugin manifest — all config options with types, defaults, and UI hints | Configuring the OpenClaw plugin, understanding available settings |
 | [**package.json**](package.json) | npm package — scripts, dependencies, entry points | Installing, building, understanding the project structure |
 
