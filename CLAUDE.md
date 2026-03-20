@@ -30,13 +30,24 @@ Qmemory is NOT just a memory system — it's the agent's **situational awareness
 
 ## What the agent sees (context injection order)
 
-1. **Session header** — channel, topic, scope, DB health, memory count
-2. **Background runs** — recent cron/subagent outcomes (summary table)
+1. **Session header** — channel, topic, scope, model name, memory count
+2. **Background activity** — recent cron/heartbeat outcomes + active sessions list
 3. **Tool call ledger** — recent tool calls (survives compaction)
-4. **Cross-session memories** — grouped by category, with IDs + scope + age
+4. **Cross-session memories** — grouped by category, with [IDs] + [scope] + (age)
 5. **Working memory** — scratchpad (task progress, findings, questions)
-6. **Knowledge graph** — entities + relationships map
+6. **Knowledge graph** — channels → topics → entities + relationships map
 7. **Tools guide** — memory tools reference (first message only)
+
+## Auto-created graph structure
+
+On every `bootstrap()`, the system automatically creates:
+- **Channel entities** (e.g., "telegram") — type: "channel"
+- **Topic entities** (e.g., "telegram/topic:7") — type: "topic"
+- **Session→topic edges** (`belongs_to_topic`) — for topic sessions
+- **Session→channel edges** (`belongs_to_channel`) — for DMs, crons, non-topic sessions
+- **Topic→channel edges** (`part_of_channel`)
+
+No agent action needed. The tree builds itself.
 
 ## OpenClaw hooks (12 registered)
 
@@ -157,9 +168,9 @@ src/
 
 ## Graph Schema (SurrealDB)
 
-4 nodes: `session`, `message`, `memory`, `entity`
+7 tables: `session`, `message`, `memory`, `entity`, `tool_call`, `scratchpad`, `metrics`
 3 structural edges: `has_message`, `extracted_from`, `prev_version` (auto-created)
-1 dynamic edge: `relates` (agent creates ANY relationship type)
+1 dynamic edge: `relates` (agent creates ANY relationship type, also used for `belongs_to_topic`, `belongs_to_channel`, `spawned`, `part_of_channel`)
 
 Schema file: `schema/qmemory.surql`
 
@@ -178,7 +189,7 @@ Schema file: `schema/qmemory.surql`
 
 | Tool | What It Does |
 |------|-------------|
-| `qmemory_search` | 4-tier recall: graph traversal → BM25 → vector → recent |
+| `qmemory_search` | 4-tier recall + cross-session tool_call history (use `include_tool_calls: true`) |
 | `qmemory_save` | Save fact with LLM dedup (ADD/UPDATE/NOOP) |
 | `qmemory_correct` | Fix or soft-delete a memory (version chain preserved) |
 | `qmemory_link` | Create dynamic `relates` edge (any relationship type) |
@@ -263,4 +274,4 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 
 ## Dependencies
 
-Only 3 runtime deps: `surrealdb` (official JS SDK) + `fastmcp` (MCP server framework) + `@sinclair/typebox` (OpenClaw tool schemas)
+4 runtime deps: `surrealdb` (JS SDK) + `fastmcp` (MCP server) + `@sinclair/typebox` (OpenClaw tool schemas) + `zod` (MCP tool schemas)
