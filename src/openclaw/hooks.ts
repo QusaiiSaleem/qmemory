@@ -33,6 +33,10 @@ import type { QmemoryLogger } from "../config.js";
 
 export interface SharedEngineState {
   currentSessionId: string | null;
+  /** Last known delivery target — set by message_sent hook, read by agent_end */
+  lastDeliveryTarget: string | null;
+  /** Current model name — set by llm_output hook, shown in session header */
+  currentModel: string | null;
 }
 
 /**
@@ -403,7 +407,9 @@ export function createAgentEndHandler(
         }`,
         {
           idPart,
-          content: `[${ctx.trigger}] ${status} (${duration}): ${summary}`,
+          content: sharedState.lastDeliveryTarget
+            ? `[${ctx.trigger} → ${sharedState.lastDeliveryTarget}] ${status} (${duration}): ${summary}`
+            : `[${ctx.trigger}] ${status} (${duration}): ${summary}`,
           salience: event.success ? 0.4 : 0.7, // Failures are more important to remember
           sourceType: ctx.trigger === "cron" ? "cron" : "agent",
         },
@@ -442,6 +448,9 @@ export function createLlmOutputHandler(
       };
     },
   ): Promise<void> => {
+    // Track model name for session header
+    if (event.model) sharedState.currentModel = event.model;
+
     if (!sharedState.currentSessionId || !event.usage) return;
 
     try {
@@ -570,6 +579,7 @@ export function createSubagentEndedHandler(
 
 export function createSessionStartHandler(
   logger: QmemoryLogger,
+  sharedState: SharedEngineState,
 ) {
   return async (
     event: {
@@ -579,11 +589,28 @@ export function createSessionStartHandler(
     },
   ): Promise<void> => {
     try {
-      if (event.resumedFrom) {
+      if (event.resumedFrom && sharedState.currentSessionId) {
+        // Save as memory so agent knows this session was restored
+        const idPart = generateId("mem");
+        await query(
+          `CREATE type::record("memory", $idPart) CONTENT {
+            content: $content,
+            category: "context",
+            salience: 0.3,
+            scope: "global",
+            is_active: true,
+            confidence: 1.0,
+            source_type: "agent",
+            created_at: time::now(),
+            updated_at: time::now()
+          }`,
+          {
+            idPart,
+            content: `Session resumed from archive: ${event.resumedFrom}. Some earlier messages may not be in context.`,
+          },
+        );
         logger.info(`Session resumed from: ${event.resumedFrom}`);
       }
-      // Lightweight — just track the event
-      // The actual session creation happens in engine.bootstrap()
     } catch {
       // Non-fatal
     }
@@ -620,6 +647,117 @@ export function createSessionEndHandler(
       ).catch(() => {});
     } catch {
       // Non-fatal
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// message_received handler — capture sender identity into entity table
+// ---------------------------------------------------------------------------
+
+export function createMessageReceivedHandler(
+  logger: QmemoryLogger,
+) {
+  return async (
+    event: {
+      from: string;
+      content: string;
+      timestamp?: number;
+      metadata?: Record<string, unknown>;
+    },
+    ctx: {
+      channelId?: string;
+      accountId?: string;
+      conversationId?: string;
+    },
+  ): Promise<void> => {
+    if (!event.from) return;
+
+    try {
+      // Upsert the sender as an entity — if they exist, just update last_active
+      const name = event.from;
+      const channel = ctx.channelId ?? "unknown";
+
+      await query(
+        `UPSERT entity SET
+          name = $name,
+          type = "person",
+          external_source = $channel,
+          external_channel = $accountId,
+          updated_at = time::now(),
+          created_at = created_at ?? time::now()
+        WHERE name = $name AND external_source = $channel`,
+        { name, channel, accountId: ctx.accountId ?? "" },
+      );
+    } catch {
+      // Fire-and-forget — never block message processing
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// message_sent handler — track delivery target for cron/subagent routing
+// ---------------------------------------------------------------------------
+
+export function createMessageSentHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      to: string;
+      content: string;
+      success: boolean;
+      error?: string;
+    },
+  ): Promise<void> => {
+    // Store delivery target so agent_end can include it in cron memories
+    if (event.to) {
+      sharedState.lastDeliveryTarget = event.to;
+    }
+
+    // Track delivery failures as memories — agent should know if messages aren't getting through
+    if (!event.success && sharedState.currentSessionId) {
+      try {
+        trackEvent(
+          sharedState.currentSessionId,
+          "delivery_failed",
+          `to:${event.to} error:${event.error?.slice(0, 100) ?? "unknown"}`,
+        ).catch(() => {});
+      } catch {
+        // Fire-and-forget
+      }
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// subagent_delivery_target handler — track where subagent output is routed
+// ---------------------------------------------------------------------------
+
+export function createSubagentDeliveryTargetHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      childSessionKey: string;
+      requesterSessionKey: string;
+      requesterOrigin?: {
+        channel?: string;
+        accountId?: string;
+        to?: string;
+        threadId?: string | number;
+      };
+    },
+  ): Promise<void> => {
+    // Store the delivery target for enriching cron/subagent outcome memories
+    if (event.requesterOrigin?.to) {
+      sharedState.lastDeliveryTarget = event.requesterOrigin.to;
+    } else if (event.requesterOrigin?.threadId) {
+      sharedState.lastDeliveryTarget = `topic:${event.requesterOrigin.threadId}`;
+    } else if (event.requesterOrigin?.channel) {
+      sharedState.lastDeliveryTarget = event.requesterOrigin.channel;
     }
   };
 }

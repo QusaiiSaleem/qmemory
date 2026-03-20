@@ -518,7 +518,8 @@ export function createEngine(
         const channelLabel = parsed.channel !== "unknown" ? parsed.channel : "direct";
         const topicLabel = parsed.topicId ? `/topic:${parsed.topicId}` : "";
         const scopeLabel = sessionScope !== "global" ? ` | scope: ${sessionScope}` : "";
-        parts.push(`_Session: ${channelLabel}/${parsed.chatType}${topicLabel}${scopeLabel} | ${fitted.length} memories recalled_`);
+        const modelLabel = sharedState?.currentModel ? ` | model: ${sharedState.currentModel}` : "";
+        parts.push(`_Session: ${channelLabel}/${parsed.chatType}${topicLabel}${scopeLabel} | ${fitted.length} memories recalled${modelLabel}_`);
       }
 
       // Part 0: Tool call ledger — max 5% of memory budget

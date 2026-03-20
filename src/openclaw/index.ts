@@ -27,8 +27,11 @@ import {
   createLlmOutputHandler,
   createSubagentSpawnedHandler,
   createSubagentEndedHandler,
+  createSubagentDeliveryTargetHandler,
   createSessionStartHandler,
   createSessionEndHandler,
+  createMessageReceivedHandler,
+  createMessageSentHandler,
 } from "./hooks.js";
 import type { SharedEngineState } from "./hooks.js";
 import type {
@@ -212,7 +215,7 @@ export default function register(api: any): void {
   }
 
   // 7. Shared state — lets hooks access the engine's current session
-  const sharedState: SharedEngineState = { currentSessionId: null };
+  const sharedState: SharedEngineState = { currentSessionId: null, lastDeliveryTarget: null, currentModel: null };
 
   // 8. Register the context engine
   const engine = createEngine(config, logger, subagentRunner, openclawConfig, embeddingConfig, sharedState);
@@ -250,8 +253,11 @@ export default function register(api: any): void {
     ["llm_output", createLlmOutputHandler(logger, sharedState)],
     ["subagent_spawned", createSubagentSpawnedHandler(logger, sharedState)],
     ["subagent_ended", createSubagentEndedHandler(logger, sharedState)],
-    ["session_start", createSessionStartHandler(logger)],
+    ["subagent_delivery_target", createSubagentDeliveryTargetHandler(logger, sharedState)],
+    ["session_start", createSessionStartHandler(logger, sharedState)],
     ["session_end", createSessionEndHandler(logger, sharedState)],
+    ["message_received", createMessageReceivedHandler(logger)],
+    ["message_sent", createMessageSentHandler(logger, sharedState)],
   ];
   for (const [name, handler] of lifecycleHooks) {
     try {
