@@ -379,6 +379,88 @@ export function createEngine(
         logger.info(`Created session: ${currentSessionId} (${channel}/${chatType}, topic:${topicId})`);
       }
 
+      // --- AUTO-CREATE GRAPH STRUCTURE ---
+      // Create channel + topic entities and link session to them.
+      // This builds the tree: channel → has_topic → topic → has_session → session
+      // Runs in background — non-blocking.
+      (async () => {
+        try {
+          if (!currentSessionId) return;
+          const sid = sessionIdPart(currentSessionId);
+
+          // Create or find channel entity
+          if (channel && channel !== "unknown") {
+            await query(
+              `UPSERT entity SET
+                name = $name, type = "channel",
+                external_source = $channel,
+                updated_at = time::now(),
+                created_at = created_at ?? time::now()
+              WHERE name = $name AND type = "channel"`,
+              { name: channel, channel },
+            );
+          }
+
+          // Create or find topic entity + link session → topic
+          if (topicId) {
+            const topicName = `${channel}/topic:${topicId}`;
+            await query(
+              `UPSERT entity SET
+                name = $name, type = "topic",
+                external_source = $channel,
+                external_id = $topicId,
+                updated_at = time::now(),
+                created_at = created_at ?? time::now()
+              WHERE name = $name AND type = "topic"`,
+              { name: topicName, channel, topicId },
+            );
+
+            // Link session → topic (if not already linked)
+            const existing = await query<{ id: string }>(
+              `SELECT id FROM relates
+               WHERE in = type::record("session", $sid)
+                 AND type = "belongs_to_topic"
+               LIMIT 1`,
+              { sid },
+            );
+            if (!existing || existing.length === 0) {
+              await query(
+                `LET $s = type::record("session", $sid);
+                 LET $t = (SELECT id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1);
+                 IF $t[0] != NONE THEN
+                   RELATE $s->relates->$t[0].id CONTENT {
+                     type: "belongs_to_topic",
+                     confidence: 1.0,
+                     created_by: "system",
+                     created_at: time::now()
+                   }
+                 END;`,
+                { sid, topicName },
+              );
+            }
+
+            // Link topic → channel (if not already linked)
+            await query(
+              `LET $t = (SELECT id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1);
+               LET $c = (SELECT id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1);
+               IF $t[0] != NONE AND $c[0] != NONE THEN
+                 IF (SELECT id FROM relates WHERE in = $t[0].id AND out = $c[0].id AND type = "part_of_channel" LIMIT 1) = [] THEN
+                   RELATE $t[0].id->relates->$c[0].id CONTENT {
+                     type: "part_of_channel",
+                     confidence: 1.0,
+                     created_by: "system",
+                     created_at: time::now()
+                   }
+                 END
+               END;`,
+              { topicName, channel },
+            );
+          }
+        } catch (err) {
+          logger.debug(`Auto-graph structure failed (non-fatal): ${err}`);
+        }
+      })();
+
       return { bootstrapped: true };
     },
 

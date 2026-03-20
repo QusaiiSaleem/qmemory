@@ -87,3 +87,6 @@ LET $id = "memory:1773844155267k5cj"; UPDATE type::record($id) SET embedding = [
 SELECT count() AS c FROM memory WHERE embedding IS NOT NONE GROUP ALL;
 SELECT array::len(embedding) AS dim FROM memory WHERE embedding IS NOT NONE LIMIT 1;
 SELECT count() AS c FROM memory WHERE embedding IS NOT NONE GROUP ALL;
+SELECT count() AS c, type FROM relates GROUP BY type ORDER BY c DESC;
+SELECT count() AS c FROM relates GROUP ALL;
+SELECT type FROM relates WHERE type = 'spawned' LIMIT 5;
