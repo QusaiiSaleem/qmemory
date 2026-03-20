@@ -10,6 +10,7 @@
  */
 
 import { Type } from "@sinclair/typebox";
+import { query } from "../db/client.js";
 import { createEngine } from "./engine.js";
 import { createLinkerService } from "./linker.js";
 import { searchMemories } from "../core/search.js";
@@ -71,8 +72,12 @@ Example: qmemory_save({content: "User prefers Arabic for reports", category: "pr
 </tool>
 
 <tool name="qmemory_search">
-Search across ALL sessions by meaning, category, or scope. Use when the injected memories don't have what you need.
-Example: qmemory_search({query: "Railway deployment", categories: ["decision", "context"]})
+Search across ALL sessions by meaning, category, or scope. Also searches tool call history when requested.
+The injected "Recent Tool Calls" table only shows the current session. Use include_tool_calls to see ALL sessions.
+Examples:
+- Find memories: qmemory_search({query: "Railway deployment"})
+- Find tool history: qmemory_search({include_tool_calls: true, tool_name: "exec"})
+- Find both: qmemory_search({query: "Railway", include_tool_calls: true})
 </tool>
 
 <tool name="qmemory_correct">
@@ -276,22 +281,14 @@ export default function register(api: any): void {
       name: "qmemory_search",
       label: "Qmemory Search",
       description:
-        "Search cross-session memory by meaning, category, scope, or graph traversal. " +
-        "Use when you need to recall past knowledge from any session or topic.\n\n" +
-        "WHY: Your context window resets every session. This tool is how you remember " +
-        "past decisions, people, projects, and preferences across sessions. Without it, " +
-        "you repeat mistakes and forget commitments.\n\n" +
-        "WHEN TO USE: Before answering ANY question about prior work, people, dates, " +
-        "or decisions. Before choosing a topic to send to. Before making a recommendation " +
-        "that should be informed by history.\n\n" +
-        "WHEN NOT TO USE: For current-session context (you already have it). " +
-        "For web searches (use web_search instead).\n\n" +
-        "RETURNS: Array of {id, content, category, salience, scope, confidence} objects, " +
-        "sorted by relevance.\n\n" +
+        "Search cross-session memory AND tool call history. " +
+        "Use when you need to recall past knowledge, decisions, or tool usage from any session.\n\n" +
+        "RETURNS: Memories (facts, decisions, preferences) + optionally tool calls from all sessions.\n\n" +
         "EXAMPLES:\n" +
         '- Find a person: qmemory_search({query: "John"})\n' +
-        '- Find decisions: qmemory_search({categories: ["decision"], scope: "project:acme"})\n' +
-        '- Find everything about a topic: qmemory_search({query: "product launch timeline"})',
+        '- Find decisions: qmemory_search({categories: ["decision"]})\n' +
+        '- Find tool usage: qmemory_search({query: "Railway", include_tool_calls: true})\n' +
+        '- Just tool calls: qmemory_search({include_tool_calls: true, tool_name: "exec"})',
       parameters: Type.Object({
         query: Type.Optional(
           Type.String({ description: "Search by meaning (BM25 full-text)" }),
@@ -314,15 +311,56 @@ export default function register(api: any): void {
             maximum: 50,
           }),
         ),
+        include_tool_calls: Type.Optional(
+          Type.Boolean({
+            description: "Also search the tool_call table across all sessions (default false)",
+          }),
+        ),
+        tool_name: Type.Optional(
+          Type.String({
+            description: "Filter tool calls by tool name (e.g. 'exec', 'qmemory_save')",
+          }),
+        ),
       }),
       execute: async (
         _toolCallId: string,
         params: Record<string, unknown>,
       ) => {
-        const results = await searchMemories(params as RecallOptions);
+        // Search memories
+        const memories = await searchMemories(params as RecallOptions);
+
+        // Optionally search tool_call table
+        let toolCalls: unknown[] = [];
+        if (params.include_tool_calls) {
+          const toolNameFilter = params.tool_name
+            ? "AND tool_name = $toolName"
+            : "";
+          const queryFilter = params.query
+            ? "AND (input_summary ~ $query OR output_summary ~ $query)"
+            : "";
+
+          const tcParams: Record<string, unknown> = {};
+          if (params.tool_name) tcParams.toolName = params.tool_name;
+          if (params.query) tcParams.query = params.query;
+          tcParams.limit = (params.limit as number) ?? 20;
+
+          const results = await query<Record<string, unknown>>(
+            `SELECT tool_name, input_summary, output_summary, duration_ms, created_at
+             FROM tool_call
+             WHERE true ${toolNameFilter} ${queryFilter}
+             ORDER BY created_at DESC
+             LIMIT $limit`,
+            tcParams,
+          );
+          toolCalls = results ?? [];
+        }
+
+        const response: Record<string, unknown> = { memories };
+        if (toolCalls.length > 0) response.tool_calls = toolCalls;
+
         return {
           content: [
-            { type: "text", text: JSON.stringify(results, null, 2) },
+            { type: "text", text: JSON.stringify(response, null, 2) },
           ],
         };
       },
