@@ -348,7 +348,7 @@ export function fitToTokenBudget(
 }
 
 /** Human-readable age: "2h ago", "3d ago", "2w ago" */
-function getAge(isoDate: string): string {
+export function getAge(isoDate: string): string {
   try {
     const ms = Date.now() - new Date(isoDate).getTime();
     if (ms < 0) return "";

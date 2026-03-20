@@ -46,6 +46,7 @@ import {
   formatGraphMap,
   fitToTokenBudget,
   estimateTokens,
+  getAge,
 } from "../config.js";
 import { enableVectorIndex, backfillEmbeddings } from "../core/embeddings.js";
 import type { EmbeddingConfig } from "../core/embeddings.js";
@@ -530,7 +531,59 @@ export function createEngine(
         parts.push(`_Session: ${channelLabel}/${parsed.chatType}${topicLabel}${scopeLabel} | ${fitted.length} memories recalled${modelLabel}_`);
       }
 
-      // Part 0: Tool call ledger — max 5% of memory budget
+      // Part 0a: Background activity — cron/heartbeat outcomes + session activity
+      // Shows what happened across OTHER sessions (agent's blind spot)
+      try {
+        const bgRuns = await query<{ content: string; source_type: string; created_at: string }>(
+          `SELECT content, source_type, created_at FROM memory
+           WHERE is_active = true
+             AND source_type IN ["cron", "agent"]
+             AND content ~ "[cron"
+           ORDER BY created_at DESC
+           LIMIT 5`,
+        );
+
+        const recentSessions = await query<{
+          session_key: string; last_active: string; chat_type: string;
+        }>(
+          `SELECT session_key, last_active, chat_type FROM session
+           ORDER BY last_active DESC
+           LIMIT 10`,
+        );
+
+        if ((bgRuns && bgRuns.length > 0) || (recentSessions && recentSessions.length > 1)) {
+          const activityLines: string[] = ["## Background Activity"];
+
+          if (bgRuns && bgRuns.length > 0) {
+            activityLines.push("**Recent background runs:**");
+            for (const run of bgRuns) {
+              const age = getAge(run.created_at);
+              activityLines.push(`- ${run.content}${age}`);
+            }
+          }
+
+          if (recentSessions && recentSessions.length > 1) {
+            activityLines.push("", "**Active sessions:**");
+            for (const sess of recentSessions.slice(0, 7)) {
+              // Parse session key to show human-readable label
+              const p = parseSessionKey(sess.session_key);
+              const topicTag = p.topicId ? `/topic:${p.topicId}` : "";
+              const age = getAge(sess.last_active);
+              const current = sess.session_key === currentSessionKey ? " ← you are here" : "";
+              activityLines.push(`- ${p.channel}/${p.chatType}${topicTag}${age}${current}`);
+            }
+          }
+
+          const activityText = activityLines.join("\n");
+          if (estimateTokens(activityText) < Math.floor(memoryBudget * 0.05)) {
+            parts.push(activityText);
+          }
+        }
+      } catch (actErr) {
+        logger.debug(`Background activity injection failed: ${actErr}`);
+      }
+
+      // Part 0b: Tool call ledger — max 5% of memory budget
       try {
         if (currentSessionId) {
           const ledgerBudget = Math.floor(memoryBudget * 0.05);
