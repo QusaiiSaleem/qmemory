@@ -63,7 +63,25 @@ export async function extractMemories(
   }
 
   // --- Build the conversation text for the LLM ---
-  const conversationText = messages
+  // Filter out messages that look like extraction prompts/responses (prevent recursion loop)
+  const filteredMessages = messages.filter((m) => {
+    const content = m.content;
+    // Skip messages that ARE extraction prompts or their JSON responses
+    if (content.includes("You are a memory extraction engine")) return false;
+    if (content.includes("memory extraction engine")) return false;
+    // Skip pure JSON array responses (extraction output)
+    const trimmed = content.trim();
+    if (trimmed.startsWith("[{") && trimmed.endsWith("}]") && trimmed.includes('"category"')) return false;
+    if (trimmed === "[]") return false;
+    return true;
+  });
+
+  if (filteredMessages.length < 2) {
+    logger.debug("Extract: after filtering extraction artifacts, fewer than 2 messages — skipping");
+    return [];
+  }
+
+  const conversationText = filteredMessages
     .map((m) => `[${m.role}]: ${m.content}`)
     .join("\n");
 

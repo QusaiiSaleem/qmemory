@@ -461,7 +461,7 @@ export function createEngine(
             query: conversationContext,
             scope: sessionScope !== "global" ? sessionScope : undefined,
             min_salience: config.min_salience_recall,
-            limit: 20,
+            limit: 50,
             token_budget: Math.floor(memoryBudget * 0.7), // 70% for contextual
           });
           memories.push(...contextual);
@@ -471,7 +471,7 @@ export function createEngine(
         // These are recalled regardless of what the conversation is about
         const critical = await recall({
           min_salience: 0.8,
-          limit: 10,
+          limit: 20,
           token_budget: Math.floor(memoryBudget * 0.3), // 30% for critical
         });
 
@@ -889,6 +889,7 @@ export function createEngine(
                   { content: fact.content, category: fact.category,
                     salience: fact.salience, scope: fact.scope, source_type: "conversation" },
                   subagentRunner,
+                  embeddingConfig,
                 );
               }
               logger.info(`Heavy compaction: saved ${facts.length} facts`);
@@ -923,6 +924,7 @@ export function createEngine(
                   { content: fact.content, category: fact.category,
                     salience: fact.salience, scope: fact.scope, source_type: "conversation" },
                   subagentRunner,
+                  embeddingConfig,
                 );
               }
               logger.info(`Pre-compaction flush: saved ${facts.length} facts`);
