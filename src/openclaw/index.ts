@@ -30,6 +30,74 @@ import type {
 import { DEFAULT_CONFIG } from "../config.js";
 
 // ---------------------------------------------------------------------------
+// Agent system context — appended to system prompt via before_prompt_build
+// Static text, cached by the provider (no per-turn token cost).
+// Follows Anthropic prompting best practices: clear, direct, XML-structured.
+// ---------------------------------------------------------------------------
+
+const AGENT_SYSTEM_CONTEXT = `
+<qmemory_graph_database>
+You have a persistent graph database (Qmemory) that captures everything across sessions.
+At the top of this prompt you'll see injected context from the graph — this is your cross-session awareness.
+
+## What's injected automatically (you don't need to search for these)
+
+- **Session header**: Which channel/topic you're in, memory count, DB health
+- **Recent Tool Calls**: Table of tools used this session (survives compaction)
+- **Cross-Session Memories**: Facts organized by category, each with an ID like [mem1234]
+- **Working Memory**: Current task progress, findings, open questions
+- **Knowledge Graph**: Entities and their relationships
+
+## Your graph database tools
+
+<tool name="qmemory_save">
+Save a fact, decision, preference, or correction. Auto-deduplicates against existing memories.
+Use PROACTIVELY when you learn something new — don't wait to be asked.
+- category: "decision" for choices made, "preference" for user likes, "context" for facts, "feedback" for corrections
+- salience: 0.8+ for critical rules/decisions, 0.5 for normal facts, 0.3 for minor details
+Example: qmemory_save({content: "User prefers Arabic for reports", category: "preference", salience: 0.7})
+</tool>
+
+<tool name="qmemory_search">
+Search across ALL sessions by meaning, category, or scope. Use when the injected memories don't have what you need.
+Example: qmemory_search({query: "Railway deployment", categories: ["decision", "context"]})
+</tool>
+
+<tool name="qmemory_correct">
+Fix, update, or delete a memory using its ID (shown as [mem1234] in the injected context).
+Actions: "correct" (new version), "update" (change metadata), "delete" (soft-delete), "unlink" (remove edge)
+Example: qmemory_correct({memory_id: "memory:mem1234", action: "correct", new_content: "Budget is 600K not 500K"})
+</tool>
+
+<tool name="qmemory_link">
+Connect any two things in the graph. The relationship type can be anything that fits.
+Example: qmemory_link({from_id: "memory:mem1234", to_id: "entity:ent5678", type: "decided_by", reason: "Ahmed approved this"})
+</tool>
+
+<tool name="qmemory_person">
+Create or find a person with linked contact identities (WhatsApp, email, Telegram, etc).
+Example: qmemory_person({name: "Ahmed", contacts: [{source: "whatsapp", id: "966501234567"}]})
+</tool>
+
+## When to use memory tools
+
+- **Save immediately**: decisions, user corrections, important facts, preferences
+- **Search when**: you need context from other sessions, someone asks "what did we decide about X?"
+- **Correct when**: user says "that's wrong" or "actually it's..."
+- **Link when**: you notice two things are related (person→project, decision→outcome)
+- **Don't save**: temporary debugging info, one-time commands, things already in the conversation
+
+## Reading the injected context
+
+Each memory line looks like: \`- [mem1234] !Budget approved at 500K [project:rakeezah] (3d ago)\`
+- \`[mem1234]\` — ID, use with qmemory_correct/qmemory_link
+- \`!\` — high salience (≥0.8), critical rule
+- \`[project:rakeezah]\` — scope (only shown for non-global)
+- \`(3d ago)\` — when it was created
+</qmemory_graph_database>
+`;
+
+// ---------------------------------------------------------------------------
 // Subagent runner type — wraps OpenClaw's subagent API into a simple function
 // ---------------------------------------------------------------------------
 
@@ -155,6 +223,16 @@ export default function register(api: any): void {
     logger.info("Hook registered: tool_result_persist");
   } catch (hookErr) {
     logger.error(`Failed to register tool_result_persist hook: ${hookErr}`);
+  }
+
+  // 10. Agent instructions — static prompt appended to system prompt (cached, no per-turn cost)
+  try {
+    api.on("before_prompt_build", () => ({
+      appendSystemContext: AGENT_SYSTEM_CONTEXT,
+    }));
+    logger.info("Hook registered: before_prompt_build");
+  } catch (hookErr) {
+    logger.error(`Failed to register before_prompt_build hook: ${hookErr}`);
   }
 
   // ----- TOOLS -----

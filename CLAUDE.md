@@ -1,6 +1,82 @@
 # Qmemory
 
-Graph memory context engine plugin for OpenClaw + MCP server for Claude Code/Claude.ai. Powered by SurrealDB.
+**Graph database infrastructure for AI agent awareness.** Captures everything that happens in OpenClaw — sessions, messages, tool calls, cron runs, subagent results, decisions, entities — as a connected graph in SurrealDB. The agent can traverse relationships to understand context across sessions, channels, and time.
+
+**Core principle:** If it happened in OpenClaw, it should be in the graph. If it's in the graph, the agent should be able to find it. Every node is connected. Nothing is orphaned.
+
+## Architecture Vision
+
+Qmemory is NOT just a memory system — it's the agent's **situational awareness layer**. The graph captures:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    QMEMORY GRAPH                                │
+│                                                                 │
+│  session ──has_message──→ message                               │
+│  session ──spawned──→ session (cron child, subagent child)      │
+│  session ──has_run──→ background_run (cron/subagent outcomes)   │
+│  message ←──extracted_from── memory                             │
+│  memory ──relates──→ memory / entity (any relationship type)    │
+│  entity ──relates──→ entity / memory                            │
+│  tool_call → linked to session (operational log)                │
+│  scratchpad → linked to session (working memory)                │
+│  metrics → linked to session (tracking)                         │
+│                                                                 │
+│  The agent sees: session header + memory table + tool ledger    │
+│  + cron summary + scratchpad + graph map — all injected via     │
+│  systemPromptAddition in assemble()                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## What the agent sees (context injection order)
+
+1. **Session header** — channel, topic, scope, DB health, memory count
+2. **Background runs** — recent cron/subagent outcomes (summary table)
+3. **Tool call ledger** — recent tool calls (survives compaction)
+4. **Cross-session memories** — grouped by category, with IDs + scope + age
+5. **Working memory** — scratchpad (task progress, findings, questions)
+6. **Knowledge graph** — entities + relationships map
+7. **Tools guide** — memory tools reference (first message only)
+
+## OpenClaw hooks — current + planned
+
+| Hook | Status | What it captures |
+|------|--------|-----------------|
+| `after_tool_call` | DONE | Log tool calls → tool_call table |
+| `tool_result_persist` | DONE | Compress large tool results before storage |
+| `before_prompt_build` | TODO | Append agent instructions (appendSystemContext) |
+| `agent_end` | TODO | Capture cron/subagent outcomes → memory with source_type "cron" |
+| `llm_output` | TODO | Token usage tracking (input, output, cache hits) → metrics |
+| `subagent_spawned` | TODO | Create session→spawned→session edge in graph |
+| `subagent_ended` | TODO | Capture child outcome, create summary memory |
+| `session_start` | TODO | Track session lifecycle, log gateway restart awareness |
+| `session_end` | TODO | Session duration, final message count |
+| `before_compaction` | TODO | Snapshot of what's about to be compacted |
+| `message_received` | SKIP | Passive group listening (noisy, low priority) |
+
+## Context injection — what the agent sees
+
+Injected via `systemPromptAddition` in `assemble()`. Built from Anthropic's prompting best practices:
+- Long data at the top, instructions at the bottom
+- XML-like structure with clear headers
+- Memory IDs visible for direct tool reference
+- Scope + age tags for quick scanning
+- Session header for orientation
+
+The `before_prompt_build` hook adds static instructions via `appendSystemContext`
+(cached by the provider, no per-turn token cost). This teaches the agent:
+- What the graph contains (tables, relationships)
+- How to use each qmemory tool
+- When to save vs search vs link
+- How to read the injected context
+
+## Design principles
+
+- **Everything is connected** — no orphan nodes. Linker runs every 5 min to find relationships
+- **Agent can traverse** — IDs are visible so agent can reference, correct, link, delete
+- **Survives compaction** — tool ledger, scratchpad, and memories persist when messages are dropped
+- **SurrealDB record references** — always use `type::record("table", $id)` for FK fields, never plain strings (JS SDK returns RecordId objects, not strings)
+- **Prompting best practices** — follow Anthropic's guidelines: clear/direct, XML structure, examples, context for motivation
 
 ## Quick Start
 
