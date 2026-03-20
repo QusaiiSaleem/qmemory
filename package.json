@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsc && cp src/ui/graph.html dist/ui/graph.html",
     "prepublishOnly": "npm run build",
+    "postinstall": "echo 'Qmemory dependencies installed'",
     "dev": "npx fastmcp dev src/mcp/server.ts",
     "inspect": "npx fastmcp inspect src/mcp/server.ts",
     "start": "tsx src/cli.ts",
@@ -31,7 +32,6 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
     "fastmcp": "^1.27.3",
-    "qmemory": "^0.1.2",
     "surrealdb": "2.0.3",
     "zod": "^3.24.4"
   },

@@ -335,6 +335,9 @@ npm install -g qmemory
 
 # OR directly through OpenClaw
 openclaw plugins install qmemory
+
+# Install dependencies (required after openclaw plugins install)
+cd ~/.openclaw/extensions/qmemory && npm install --omit=dev
 ```
 
 **Step 3: Set Qmemory as your context engine**
