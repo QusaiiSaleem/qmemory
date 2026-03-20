@@ -343,6 +343,35 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
   }
 
   // -------------------------------------------------------------------
+  // SALIENCE DECAY — old memories gradually lose importance
+  // Runs alongside the linker (every 5 min, but only decays weekly)
+  // -------------------------------------------------------------------
+
+  async function runSalienceDecay(): Promise<void> {
+    try {
+      // Decay memories older than 7 days that haven't been recalled recently.
+      // Multiply salience by 0.95 — a memory at 0.8 drops to 0.44 after 3 months.
+      // Floor at 0.1 so no memory becomes completely invisible.
+      const result = await query<{ count: number }>(
+        `UPDATE memory SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
+         WHERE is_active = true
+           AND salience > 0.15
+           AND updated_at < time::now() - 7d
+         RETURN NONE;
+         SELECT count() AS count FROM memory
+         WHERE is_active = true AND updated_at < time::now() - 7d
+         GROUP ALL;`,
+      );
+      const decayed = result?.[0]?.count ?? 0;
+      if (decayed > 0) {
+        logger.info(`Salience decay: ${decayed} memories older than 7d`);
+      }
+    } catch (error) {
+      logger.debug(`Salience decay failed: ${error}`);
+    }
+  }
+
+  // -------------------------------------------------------------------
   // Service object — registered with OpenClaw via api.registerService()
   // -------------------------------------------------------------------
 
@@ -351,7 +380,10 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
 
     async start() {
       // Start periodic tasks
-      linkerTimer = setInterval(runLinker, config.linker_interval_ms);
+      linkerTimer = setInterval(() => {
+        runLinker();
+        runSalienceDecay(); // Piggyback on linker interval
+      }, config.linker_interval_ms);
       reflectTimer = setInterval(runReflect, config.reflect_interval_ms);
 
       logger.info(
@@ -359,8 +391,9 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
         `reflect every ${config.reflect_interval_ms / 1000}s)`,
       );
 
-      // Run the linker once on startup (after a short delay to let DB connect)
+      // Run linker + salience decay on startup (after short delay for DB)
       setTimeout(runLinker, 5000);
+      setTimeout(runSalienceDecay, 10000);
     },
 
     async stop() {

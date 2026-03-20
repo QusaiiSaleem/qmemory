@@ -69,10 +69,15 @@ export async function recall(
   const targetCount = options.limit ?? 20;
 
   // --- Tier 1: Graph-linked memories ---
-  // Traverse 'relates' edges from entities mentioned in the current session
-  const graphMemories = sessionKey ? await fetchGraphLinked(sessionKey) : [];
-  collected.push(...graphMemories);
-  logger.debug(`Recall tier 1 (graph): ${graphMemories.length} memories`);
+  // Find memories connected via relates edges to other memories found by query
+  // (Skip if no query — graph traversal needs a starting point)
+  if (options.query && options.query.length > 10) {
+    const graphMemories = await fetchGraphLinked(options.query);
+    collected.push(...graphMemories);
+    logger.debug(`Recall tier 1 (graph): ${graphMemories.length} memories`);
+  } else {
+    logger.debug(`Recall tier 1 (graph): skipped — no query context`);
+  }
 
   // --- Tier 2: BM25 full-text search (skip if Tier 1 has plenty) ---
   if (options.query && collected.length < targetCount * 1.5) {
@@ -122,24 +127,43 @@ export async function recall(
 // ---------------------------------------------------------------------------
 
 /**
- * Tier 1: Find memories linked via graph edges to the current session's entities.
- * Traverses: session → relates → entity → relates → memory
+ * Tier 1: Find memories linked via graph edges to entities matching the query.
+ * Strategy: find entities whose name matches words in the query,
+ * then traverse their relates edges to find connected memories.
  */
-async function fetchGraphLinked(sessionKey: string): Promise<RecalledMemory[]> {
-  // Find memories connected to entities that relate to this session
+async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
+  // Extract likely entity names (capitalized words, 3+ chars)
+  const words = queryText
+    .split(/\s+/)
+    .filter((w) => w.length >= 3)
+    .map((w) => w.replace(/[^a-zA-Z\u0600-\u06FF0-9]/g, "")) // Keep Arabic + Latin + digits
+    .filter((w) => w.length >= 3)
+    .slice(0, 10); // Cap to avoid huge queries
+
+  if (words.length === 0) return [];
+
+  // Find memories connected to entities whose names match query words
   const surql = `
+    LET $entities = (
+      SELECT id FROM entity
+      WHERE ${words.map((_, i) => `name ~ $w${i}`).join(" OR ")}
+      LIMIT 10
+    );
     SELECT * FROM memory
     WHERE is_active = true
-      AND id IN (
-        SELECT VALUE ->relates->memory FROM session
-        WHERE session_key = $sessionKey
-      )[0]
       AND (valid_until IS NONE OR valid_until > time::now())
+      AND id IN (
+        SELECT VALUE <-relates<-.id FROM $entities
+        WHERE <-relates<-.id IS NOT NONE
+      )[0] ?? []
     ORDER BY salience DESC
-    LIMIT 20;
+    LIMIT 15;
   `;
 
-  const rows = await query<RecalledMemory>(surql, { sessionKey });
+  const params: Record<string, unknown> = {};
+  words.forEach((w, i) => { params[`w${i}`] = w; });
+
+  const rows = await query<RecalledMemory>(surql, params);
   return rows ?? [];
 }
 
