@@ -571,9 +571,19 @@ export function createEngine(
         return { ok: false, compacted: false };
       }
 
+      // Stage-aware compaction: protect fewer messages at higher usage
+      const usageRatio = currentTokenCount / tokenBudget;
+      const protectedCount = usageRatio > 0.95
+        ? Math.min(config.fresh_tail_count, 8)   // Emergency: keep fewer
+        : usageRatio > 0.85
+          ? Math.min(config.fresh_tail_count, 16) // Heavy: keep half
+          : config.fresh_tail_count;               // Normal
+
+      if (usageRatio > 0.85) {
+        logger.info(`Stage-aware compaction: protecting only ${protectedCount} messages at ${Math.round(usageRatio * 100)}%`);
+      }
+
       // Calculate how many messages to compact
-      // Keep fresh_tail_count messages protected from compaction
-      const protectedCount = config.fresh_tail_count;
       const totalMessages = messages.length;
 
       if (totalMessages <= protectedCount) {
@@ -670,8 +680,11 @@ export function createEngine(
 
     // -----------------------------------------------------------------
     // afterTurn() — Called after the agent responds (async, non-blocking)
-    // Extract facts from recent messages, dedup, and save.
-    // Also: pre-compaction flush at 70% context usage.
+    // Multi-stage graduated compaction:
+    //   Stage 1 (50%+): Light — summarize old turns
+    //   Stage 2 (70%+): Medium — existing pre-compaction flush
+    //   Stage 3 (85%+): Heavy — clear old tool_call records, compress scratchpad
+    //   Stage 4 (95%+): Emergency — extract ALL memories, full checkpoint
     // -----------------------------------------------------------------
     async afterTurn(params: {
       messages: unknown[];
@@ -682,15 +695,101 @@ export function createEngine(
 
       const { messages, tokenBudget, currentTokenCount } = params;
 
-      // Pre-compaction flush: if context > 70%, extract memories NOW
-      // This fixes OpenClaw #19488 where the built-in flush never fires
+      // --- MULTI-STAGE COMPACTION ---
       if (tokenBudget && currentTokenCount) {
         const usageRatio = currentTokenCount / tokenBudget;
-        if (usageRatio > 0.7) {
+
+        if (usageRatio > 0.95) {
+          // STAGE 4: Emergency — full checkpoint
+          logger.warn(`Emergency compaction at ${Math.round(usageRatio * 100)}%`);
+          const allExtractable = messages.slice(
+            0,
+            Math.max(0, messages.length - Math.min(config.fresh_tail_count, 8)),
+          );
+          if (allExtractable.length > 0) {
+            const msgArray = allExtractable.map((m: any) => ({
+              id: "", session: "", role: m.role ?? "user",
+              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+            })) as import("../config.js").Message[];
+            try {
+              const facts = await extractMemories(msgArray, subagentRunner);
+              for (const fact of facts) {
+                await saveMemory(
+                  { content: fact.content, category: fact.category,
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                  subagentRunner,
+                  embeddingConfig,
+                );
+              }
+              logger.info(`Emergency compaction: saved ${facts.length} facts from all messages`);
+            } catch (error) {
+              logger.warn(`Emergency compaction failed: ${error}`);
+            }
+          }
+          // Also clear all tool_call records for this session
+          if (currentSessionId) {
+            try {
+              await query(
+                "DELETE tool_call WHERE session = $session",
+                { session: currentSessionId },
+              );
+            } catch { /* non-fatal */ }
+          }
+
+        } else if (usageRatio > 0.85) {
+          // STAGE 3: Heavy — clear old tool_call records + compress scratchpad
+          logger.info(`Heavy compaction at ${Math.round(usageRatio * 100)}%`);
+          // Clear tool_call records older than 10 most recent
+          if (currentSessionId) {
+            try {
+              // Keep only the 10 most recent tool calls
+              const oldCalls = await query<{ id: string }>(
+                `SELECT id FROM tool_call
+                 WHERE session = $session
+                 ORDER BY created_at DESC
+                 LIMIT 1000 START 10`,
+                { session: currentSessionId },
+              );
+              if (oldCalls && oldCalls.length > 0) {
+                const ids = oldCalls.map(c => c.id);
+                await query("DELETE $ids", { ids });
+                logger.debug(`Heavy compaction: cleared ${ids.length} old tool_call records`);
+              }
+            } catch (error) {
+              logger.debug(`Tool call cleanup failed: ${error}`);
+            }
+          }
+          // Also do the stage 2 extraction
+          const extractableMessages = messages.slice(
+            0,
+            Math.max(0, messages.length - config.fresh_tail_count),
+          );
+          if (extractableMessages.length > 0) {
+            const msgArray = extractableMessages.map((m: any) => ({
+              id: "", session: "", role: m.role ?? "user",
+              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+            })) as import("../config.js").Message[];
+            try {
+              const facts = await extractMemories(msgArray, subagentRunner);
+              for (const fact of facts) {
+                await saveMemory(
+                  { content: fact.content, category: fact.category,
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                  subagentRunner,
+                );
+              }
+              logger.info(`Heavy compaction: saved ${facts.length} facts`);
+            } catch (error) {
+              logger.warn(`Heavy compaction extraction failed: ${error}`);
+            }
+          }
+
+        } else if (usageRatio > 0.7) {
+          // STAGE 2: Medium — existing pre-compaction flush
+          // This fixes OpenClaw #19488 where the built-in flush never fires
           logger.info(
             `Pre-compaction flush: context at ${Math.round(usageRatio * 100)}%`,
           );
-          // Extract from all but the most recent messages
           const extractableMessages = messages.slice(
             0,
             Math.max(0, messages.length - config.fresh_tail_count),
@@ -712,6 +811,33 @@ export function createEngine(
               logger.info(`Pre-compaction flush: saved ${facts.length} facts`);
             } catch (error) {
               logger.warn(`Pre-compaction flush failed: ${error}`);
+            }
+          }
+
+        } else if (usageRatio > 0.5) {
+          // STAGE 1: Light — summarize messages older than 15 turns
+          logger.debug(`Light compaction at ${Math.round(usageRatio * 100)}%`);
+          const oldMessages = messages.slice(0, Math.max(0, messages.length - 15));
+          if (oldMessages.length > 5) {
+            const msgArray = oldMessages.map((m: any) => ({
+              id: "", session: "", role: m.role ?? "user",
+              content: m.content ?? "", token_count: 0, created_at: new Date().toISOString(),
+            })) as import("../config.js").Message[];
+            try {
+              const facts = await extractMemories(msgArray, subagentRunner);
+              for (const fact of facts) {
+                await saveMemory(
+                  { content: fact.content, category: fact.category,
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                  subagentRunner,
+                  embeddingConfig,
+                );
+              }
+              if (facts.length > 0) {
+                logger.debug(`Light compaction: saved ${facts.length} facts`);
+              }
+            } catch (error) {
+              logger.debug(`Light compaction failed: ${error}`);
             }
           }
         }
