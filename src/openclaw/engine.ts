@@ -401,6 +401,32 @@ export function createEngine(
             );
           }
 
+          // Link session → channel directly (for DMs, crons, non-topic sessions)
+          if (channel && channel !== "unknown" && !topicId) {
+            const existing = await query<{ id: string }>(
+              `SELECT id FROM relates
+               WHERE in = type::record("session", $sid)
+                 AND type = "belongs_to_channel"
+               LIMIT 1`,
+              { sid },
+            );
+            if (!existing || existing.length === 0) {
+              await query(
+                `LET $s = type::record("session", $sid);
+                 LET $c = (SELECT id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1);
+                 IF $c[0] != NONE THEN
+                   RELATE $s->relates->$c[0].id CONTENT {
+                     type: "belongs_to_channel",
+                     confidence: 1.0,
+                     created_by: "system",
+                     created_at: time::now()
+                   }
+                 END;`,
+                { sid, channel },
+              );
+            }
+          }
+
           // Create or find topic entity + link session → topic
           if (topicId) {
             const topicName = `${channel}/topic:${topicId}`;
