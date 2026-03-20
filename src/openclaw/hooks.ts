@@ -5,8 +5,14 @@
  * Separated from index.ts to keep the entry point clean.
  *
  * Hooks:
- *   after_tool_call    — log every tool call to the ledger
+ *   after_tool_call     — log every tool call to the ledger
  *   tool_result_persist — compress large tool results before storage
+ *   agent_end           — capture cron/subagent outcomes as memories
+ *   llm_output          — track token usage per turn
+ *   subagent_spawned    — create session→spawned→session graph edge
+ *   subagent_ended      — capture child outcome + summary memory
+ *   session_start       — track session lifecycle
+ *   session_end         — session duration + message count
  *
  * NOTE on after_tool_call: OpenClaw fires this hook and tracks tool calls
  * internally, but does NOT expose a queryable API for plugins to read
@@ -325,6 +331,295 @@ export function createToolResultPersistHandler(logger: QmemoryLogger) {
     } catch (error) {
       // Non-fatal — return void to keep original message
       logger.debug(`Tool result compression failed: ${error}`);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// agent_end handler — capture cron/subagent run outcomes
+// ---------------------------------------------------------------------------
+
+export function createAgentEndHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      messages: unknown[];
+      success: boolean;
+      error?: string;
+      durationMs?: number;
+    },
+    ctx: {
+      agentId?: string;
+      sessionKey?: string;
+      sessionId?: string;
+      trigger?: string; // "user" | "cron" | "heartbeat" | "memory"
+      channelId?: string;
+    },
+  ): Promise<void> => {
+    // Only capture non-user triggers (cron, heartbeat, memory)
+    if (!ctx.trigger || ctx.trigger === "user") return;
+    if (!sharedState.currentSessionId) return;
+
+    try {
+      // Extract the last assistant message as the outcome summary
+      const lastAssistant = [...event.messages].reverse().find(
+        (m: any) => m?.role === "assistant",
+      ) as { content: unknown } | undefined;
+
+      let summary = ctx.trigger;
+      if (lastAssistant) {
+        // Extract text from content blocks
+        const content = lastAssistant.content;
+        if (typeof content === "string") {
+          summary = content.slice(0, 300);
+        } else if (Array.isArray(content)) {
+          summary = content
+            .filter((b: any) => b?.type === "text")
+            .map((b: any) => b.text)
+            .join(" ")
+            .slice(0, 300);
+        }
+      }
+
+      const status = event.success ? "OK" : `ERROR: ${event.error?.slice(0, 100) ?? "unknown"}`;
+      const duration = event.durationMs ? `${Math.round(event.durationMs / 1000)}s` : "?";
+
+      // Save as memory with source_type matching the trigger
+      const idPart = generateId("mem");
+      const sid = sessionIdPart(sharedState.currentSessionId);
+      await query(
+        `CREATE type::record("memory", $idPart) CONTENT {
+          content: $content,
+          category: "context",
+          salience: $salience,
+          scope: "global",
+          is_active: true,
+          confidence: 0.8,
+          source_type: $sourceType,
+          created_at: time::now(),
+          updated_at: time::now()
+        }`,
+        {
+          idPart,
+          content: `[${ctx.trigger}] ${status} (${duration}): ${summary}`,
+          salience: event.success ? 0.4 : 0.7, // Failures are more important to remember
+          sourceType: ctx.trigger === "cron" ? "cron" : "agent",
+        },
+      );
+
+      // Track the event
+      trackEvent(sharedState.currentSessionId, "background_run", ctx.trigger).catch(() => {});
+
+      logger.info(`Agent end: ${ctx.trigger} ${status} (${duration})`);
+    } catch (error) {
+      logger.debug(`Agent end capture failed: ${error}`);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// llm_output handler — track token usage per turn
+// ---------------------------------------------------------------------------
+
+export function createLlmOutputHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      runId: string;
+      sessionId: string;
+      provider: string;
+      model: string;
+      usage?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        total?: number;
+      };
+    },
+  ): Promise<void> => {
+    if (!sharedState.currentSessionId || !event.usage) return;
+
+    try {
+      const { input = 0, output = 0, cacheRead = 0, total = 0 } = event.usage;
+      const data = `in:${input} out:${output} cache:${cacheRead} total:${total}`;
+      trackEvent(sharedState.currentSessionId, "llm_tokens", data).catch(() => {});
+    } catch {
+      // Fire-and-forget
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// subagent_spawned handler — create parent→child session edge
+// ---------------------------------------------------------------------------
+
+export function createSubagentSpawnedHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      childSessionKey: string;
+      agentId: string;
+      label?: string;
+      mode: "run" | "session";
+      runId: string;
+    },
+  ): Promise<void> => {
+    if (!sharedState.currentSessionId) return;
+
+    try {
+      // Create a "spawned" edge from parent session → child session (by key)
+      // We store the child session key as the edge reason since we may not have the child's record ID yet
+      const sid = sessionIdPart(sharedState.currentSessionId);
+      await query(
+        `LET $parent = type::record("session", $parentId);
+         LET $child = (SELECT id FROM session WHERE session_key = $childKey LIMIT 1);
+         IF $child[0] != NONE THEN
+           RELATE $parent->relates->$child[0].id CONTENT {
+             type: "spawned",
+             reason: $label,
+             confidence: 1.0,
+             created_by: "system",
+             created_at: time::now()
+           }
+         END;`,
+        {
+          parentId: sid,
+          childKey: event.childSessionKey,
+          label: event.label ?? `${event.mode} subagent`,
+        },
+      );
+
+      logger.debug(`Subagent spawned: ${event.childSessionKey} (${event.mode})`);
+    } catch (error) {
+      logger.debug(`Subagent spawned edge failed: ${error}`);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// subagent_ended handler — capture child outcome
+// ---------------------------------------------------------------------------
+
+export function createSubagentEndedHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      targetSessionKey: string;
+      reason: string;
+      outcome?: "ok" | "error" | "timeout" | "killed" | "reset" | "deleted";
+      error?: string;
+      runId?: string;
+      endedAt?: number;
+    },
+  ): Promise<void> => {
+    if (!sharedState.currentSessionId) return;
+
+    try {
+      const outcome = event.outcome ?? "unknown";
+      const duration = event.endedAt
+        ? `${Math.round((Date.now() - event.endedAt) / 1000)}s`
+        : "?";
+
+      trackEvent(
+        sharedState.currentSessionId,
+        "subagent_ended",
+        `${outcome}:${event.reason}`,
+      ).catch(() => {});
+
+      if (outcome === "error" || outcome === "timeout") {
+        // Save failures as memories — agent should know about them
+        const idPart = generateId("mem");
+        await query(
+          `CREATE type::record("memory", $idPart) CONTENT {
+            content: $content,
+            category: "context",
+            salience: 0.6,
+            scope: "global",
+            is_active: true,
+            confidence: 0.8,
+            source_type: "agent",
+            created_at: time::now(),
+            updated_at: time::now()
+          }`,
+          {
+            idPart,
+            content: `Subagent ${outcome}: ${event.error?.slice(0, 200) ?? event.reason} (session: ${event.targetSessionKey})`,
+          },
+        );
+      }
+
+      logger.debug(`Subagent ended: ${event.targetSessionKey} → ${outcome}`);
+    } catch (error) {
+      logger.debug(`Subagent ended capture failed: ${error}`);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// session_start handler — track session lifecycle
+// ---------------------------------------------------------------------------
+
+export function createSessionStartHandler(
+  logger: QmemoryLogger,
+) {
+  return async (
+    event: {
+      sessionId: string;
+      sessionKey?: string;
+      resumedFrom?: string;
+    },
+  ): Promise<void> => {
+    try {
+      if (event.resumedFrom) {
+        logger.info(`Session resumed from: ${event.resumedFrom}`);
+      }
+      // Lightweight — just track the event
+      // The actual session creation happens in engine.bootstrap()
+    } catch {
+      // Non-fatal
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// session_end handler — session duration + message count
+// ---------------------------------------------------------------------------
+
+export function createSessionEndHandler(
+  logger: QmemoryLogger,
+  sharedState: SharedEngineState,
+) {
+  return async (
+    event: {
+      sessionId: string;
+      sessionKey?: string;
+      messageCount: number;
+      durationMs?: number;
+    },
+  ): Promise<void> => {
+    if (!sharedState.currentSessionId) return;
+
+    try {
+      const duration = event.durationMs
+        ? `${Math.round(event.durationMs / 1000)}s`
+        : "?";
+
+      trackEvent(
+        sharedState.currentSessionId,
+        "session_end",
+        `msgs:${event.messageCount} duration:${duration}`,
+      ).catch(() => {});
+    } catch {
+      // Non-fatal
     }
   };
 }

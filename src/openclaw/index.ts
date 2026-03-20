@@ -20,7 +20,16 @@ import { resolveEmbeddingConfig, setEmbeddingLogger } from "../core/embeddings.j
 import { importFile, setMigrateLogger } from "../core/migrate.js";
 import { createPerson, findPersonContext, setPersonLogger } from "../core/person.js";
 import { handleGraphRequest } from "../ui/graph-handler.js";
-import { createAfterToolCallHandler, createToolResultPersistHandler } from "./hooks.js";
+import {
+  createAfterToolCallHandler,
+  createToolResultPersistHandler,
+  createAgentEndHandler,
+  createLlmOutputHandler,
+  createSubagentSpawnedHandler,
+  createSubagentEndedHandler,
+  createSessionStartHandler,
+  createSessionEndHandler,
+} from "./hooks.js";
 import type { SharedEngineState } from "./hooks.js";
 import type {
   QmemoryConfig,
@@ -233,6 +242,24 @@ export default function register(api: any): void {
     logger.info("Hook registered: before_prompt_build");
   } catch (hookErr) {
     logger.error(`Failed to register before_prompt_build hook: ${hookErr}`);
+  }
+
+  // 11. Lifecycle hooks — capture everything into the graph
+  const lifecycleHooks: Array<[string, (...args: any[]) => any]> = [
+    ["agent_end", createAgentEndHandler(logger, sharedState)],
+    ["llm_output", createLlmOutputHandler(logger, sharedState)],
+    ["subagent_spawned", createSubagentSpawnedHandler(logger, sharedState)],
+    ["subagent_ended", createSubagentEndedHandler(logger, sharedState)],
+    ["session_start", createSessionStartHandler(logger)],
+    ["session_end", createSessionEndHandler(logger, sharedState)],
+  ];
+  for (const [name, handler] of lifecycleHooks) {
+    try {
+      api.on(name as any, handler);
+      logger.info(`Hook registered: ${name}`);
+    } catch (hookErr) {
+      logger.error(`Failed to register ${name} hook: ${hookErr}`);
+    }
   }
 
   // ----- TOOLS -----

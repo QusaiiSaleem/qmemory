@@ -99,7 +99,7 @@ export interface Memory {
   scope: string;          // "global", "project:xxx", "topic:xxx"
   is_active: boolean;     // Soft-delete flag
   confidence: number;     // LLM confidence 0.0 - 1.0
-  source_type: "conversation" | "workspace" | "agent" | "linker" | "reflect";
+  source_type: "conversation" | "workspace" | "agent" | "linker" | "reflect" | "cron";
   prev_version?: string;  // FK → memory:xxx (version chain)
   embedding?: number[];   // Optional vector
   created_at: string;
