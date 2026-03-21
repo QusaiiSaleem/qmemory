@@ -172,7 +172,7 @@ export async function backfillEmbeddings(
       if (embedding) {
         // mem.id is a RecordId — pass directly, SurrealDB SDK handles it
         const updateResult = await query(
-          `UPDATE $id SET embedding = $embedding`,
+          `UPDATE type::record($id) SET embedding = $embedding`,
           { id: mem.id, embedding },
         );
         logger.debug(`Backfill: updated ${String(mem.id)} → ${updateResult ? "ok" : "null"}`);

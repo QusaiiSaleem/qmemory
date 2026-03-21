@@ -338,7 +338,7 @@ export function createEngine(
         currentSessionId = String(existing[0].id); // RecordId → string
         if (sharedState) sharedState.currentSessionId = currentSessionId;
         await query(
-          "UPDATE $id SET last_active = time::now()",
+          "UPDATE type::record($id) SET last_active = time::now()",
           { id: currentSessionId },
         );
         logger.debug(`Loaded existing session: ${currentSessionId}`);
@@ -509,25 +509,34 @@ export function createEngine(
       const tokenCount = estimateTokens(params.content);
 
       // Create message node
+      // SurrealDB 3.0: option<> fields reject NULL — omit them entirely when absent
+      const optionalMsgFields: string[] = [];
+      const msgParams: Record<string, unknown> = {
+        id: messageId,
+        sessionId: sessionIdPart(currentSessionId!),
+        role: params.role,
+        content: params.content,
+        tokenCount: tokenCount,
+      };
+      if (params.toolCalls) {
+        optionalMsgFields.push("tool_calls: $toolCalls,");
+        msgParams.toolCalls = params.toolCalls;
+      }
+      if (params.toolName) {
+        optionalMsgFields.push("tool_name: $toolName,");
+        msgParams.toolName = params.toolName;
+      }
+
       await query(
         `CREATE $id CONTENT {
           session: type::record("session", $sessionId),
           role: $role,
           content: $content,
-          tool_calls: $toolCalls,
-          tool_name: $toolName,
+          ${optionalMsgFields.join("\n          ")}
           token_count: $tokenCount,
           created_at: time::now()
         }`,
-        {
-          id: messageId,
-          sessionId: sessionIdPart(currentSessionId!),
-          role: params.role,
-          content: params.content,
-          toolCalls: params.toolCalls ?? null,
-          toolName: params.toolName ?? null,
-          tokenCount: tokenCount,
-        },
+        msgParams,
       );
 
       // Create structural edge: session → message

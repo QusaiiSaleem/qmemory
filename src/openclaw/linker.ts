@@ -174,9 +174,10 @@ If no relationships found, return: []`;
 
       // Mark all processed memories as linked — even if no edges were created.
       // This prevents the same memories from being re-checked every cycle.
+      // SurrealDB 3.0: UPDATE doesn't accept array params directly — use WHERE id IN
       const processedIds = unlinked.map((m) => m.id);
       await query(
-        `UPDATE $ids SET linked = true`,
+        `UPDATE memory SET linked = true WHERE id IN $ids`,
         { ids: processedIds },
       );
 
@@ -322,7 +323,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
         try {
           // Soft-delete the old (contradicted) memory
           await query(
-            `UPDATE $id SET is_active = false, updated_at = time::now()`,
+            `UPDATE type::record($id) SET is_active = false, updated_at = time::now()`,
             { id: contradiction.old_id },
           );
 
@@ -390,9 +391,10 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
 
       if (!staleIds || staleIds.length === 0) return;
 
+      // SurrealDB 3.0: UPDATE doesn't accept array params — use WHERE id IN
       await query(
-        `UPDATE $ids SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
-         RETURN NONE;`,
+        `UPDATE memory SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
+         WHERE id IN $ids`,
         { ids: staleIds.map((r) => r.id) },
       );
 
