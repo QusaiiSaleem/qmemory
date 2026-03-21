@@ -104,7 +104,7 @@ examples, clear motivation). Teaches the agent:
 
 ## Design principles
 
-- **Everything is connected** — no orphan nodes. Linker runs every 5 min to find relationships
+- **Everything is connected** — no orphan nodes. Linker runs every 30 min to find relationships
 - **Agent can traverse** — IDs are visible so agent can reference, correct, link, delete
 - **Survives compaction** — tool ledger, scratchpad, and memories persist when messages are dropped
 - **SurrealDB record references** — always use `type::record("table", $id)` for FK fields, never plain strings (JS SDK returns RecordId objects, not strings)
@@ -215,9 +215,11 @@ Auth: `plugin` mode (no token needed on localhost).
 
 ## Background Services
 
-- **Linker** (every 5 min): finds unlinked memories, asks subagent for relationships, creates `relates` edges
-- **Salience Decay** (every 5 min): memories older than 7 days get salience *= 0.95 (floor 0.1)
-- **Reflect** (every 30 min): synthesizes insights across memories, resolves contradictions
+All background tasks use **self-scheduling**: after each run, the task checks if it found work. Found work → run again sooner (burst mode). No work → back off (idle mode). Reflect is staggered by half-interval so they never compete for the subagent runner.
+
+- **Linker** (5 min active / 30 min idle): finds unlinked memories, asks subagent for relationships, creates `relates` edges
+- **Salience Decay** (piggybacks on Linker): memories older than 7 days get salience *= 0.95 (floor 0.1). Pure DB, no LLM cost
+- **Reflect** (10 min active / 30 min idle, staggered): synthesizes insights across memories, resolves contradictions
 
 ## Memory Fields
 
@@ -262,8 +264,8 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 - `fresh_tail_count: 32` — protect recent messages from compaction
 - `memory_budget_pct: 0.15` — max 15% of context for memory injection
 - `embedding_provider: "auto"` — reads from OpenClaw's existing config
-- `linker_interval_ms: 300000` — linker runs every 5 minutes
-- `reflect_interval_ms: 1800000` — reflect runs every 30 minutes
+- `linker_interval_ms: 1800000` — linker idle interval (30 min). When active: 5 min
+- `reflect_interval_ms: 1800000` — reflect idle interval (30 min). When active: 10 min. Staggered 15 min after linker
 
 ## Publishing
 

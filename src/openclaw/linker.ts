@@ -1,16 +1,23 @@
 /**
  * Qmemory Background Linker Service
  *
- * Two periodic tasks that make the graph smarter over time:
+ * Three background tasks that make the graph smarter over time:
  *
- * 1. LINKER (every 5 min): Find unlinked memories, ask LLM for
- *    relationships, create `relates` edges between them.
+ * 1. LINKER: Find unlinked memories, ask LLM for relationships,
+ *    create `relates` edges. Self-scheduling: 5 min when active,
+ *    30 min when idle.
  *
- * 2. REFLECT (every 30 min): Review recent memories, synthesize
- *    insights, resolve contradictions. Inspired by Hindsight (91.4%
- *    LongMemEval — highest accuracy of any memory system).
+ * 2. REFLECT: Review recent memories, synthesize insights, resolve
+ *    contradictions. Self-scheduling: 10 min when active, 30 min
+ *    when idle. Staggered from Linker by half-interval.
  *
- * Both tasks use OpenClaw subagents — no extra API keys needed.
+ * 3. SALIENCE DECAY: Piggybacks on Linker. Pure DB, no LLM cost.
+ *
+ * Scheduling pattern: each task checks if it found work, then
+ * schedules its next run sooner (active) or later (idle). No fixed
+ * intervals — responsive to bursts, efficient when quiet.
+ *
+ * Both LLM tasks use OpenClaw subagents — no extra API keys needed.
  */
 
 import { query, generateId } from "../db/client.js";
@@ -27,37 +34,44 @@ export function createLinkerService(
   logger: QmemoryLogger,
   subagentRunner?: SubagentRunner,
 ) {
-  let linkerTimer: ReturnType<typeof setInterval> | null = null;
-  let reflectTimer: ReturnType<typeof setInterval> | null = null;
+  // Self-scheduling: each task schedules its own next run after completing
+  let linkerTimeout: ReturnType<typeof setTimeout> | null = null;
+  let reflectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let running = false;
 
-  // Track whether a task is already running (prevent overlap)
+  // Overlap protection (safety net — self-scheduling prevents this naturally)
   let linkerRunning = false;
   let reflectRunning = false;
 
+  // Shorter intervals when work was found (responsive to activity bursts)
+  const LINKER_ACTIVE_MS = 5 * 60_000;   // 5 min — process next batch quickly
+  const REFLECT_ACTIVE_MS = 10 * 60_000; // 10 min — heavier task, more spacing
+
   // -------------------------------------------------------------------
   // LINKER — Find unlinked memories and create relationships
-  // Runs every config.linker_interval_ms (default: 5 minutes)
+  // Returns true if work was found (edges created) → schedule sooner
   // -------------------------------------------------------------------
 
-  async function runLinker(): Promise<void> {
-    if (linkerRunning) return; // Prevent overlapping runs
-    if (!subagentRunner) return;
+  async function runLinker(): Promise<boolean> {
+    if (linkerRunning) return false;
+    if (!subagentRunner) return false;
 
     linkerRunning = true;
 
     try {
-      // Step 1: Find memories with 0 outgoing `relates` edges (limit 10)
+      // Step 1: Find unlinked memories using the indexed `linked` field.
+      // Much faster than count(->relates) = 0 which traverses every memory's edges.
       const unlinked = await query<Memory>(
         `SELECT * FROM memory
          WHERE is_active = true
-           AND count(->relates) = 0
+           AND linked = false
          ORDER BY created_at DESC
          LIMIT 10`,
       );
 
       if (!unlinked || unlinked.length === 0) {
         logger.debug("Linker: no unlinked memories found");
-        return;
+        return false;
       }
 
       // Step 2: Get 20 most recent other memories for comparison
@@ -73,7 +87,7 @@ export function createLinkerService(
 
       if (!candidates || candidates.length === 0) {
         logger.debug("Linker: no candidate memories to compare against");
-        return;
+        return false;
       }
 
       // Step 3: Ask the LLM which memories are related
@@ -123,7 +137,7 @@ If no relationships found, return: []`;
         }
       } catch (parseError) {
         logger.warn(`Linker: failed to parse LLM response: ${parseError}`);
-        return;
+        return false;
       }
 
       // Step 5: Create `relates` edges for each relationship
@@ -158,11 +172,21 @@ If no relationships found, return: []`;
         }
       }
 
+      // Mark all processed memories as linked — even if no edges were created.
+      // This prevents the same memories from being re-checked every cycle.
+      const processedIds = unlinked.map((m) => m.id);
+      await query(
+        `UPDATE $ids SET linked = true`,
+        { ids: processedIds },
+      );
+
       if (edgesCreated > 0) {
         logger.info(`Linker: created ${edgesCreated} relationship edges`);
       }
+      return edgesCreated > 0;
     } catch (error) {
       logger.error(`Linker task failed: ${error}`);
+      return false;
     } finally {
       linkerRunning = false;
     }
@@ -170,12 +194,12 @@ If no relationships found, return: []`;
 
   // -------------------------------------------------------------------
   // REFLECT — Synthesize insights and resolve contradictions
-  // Runs every config.reflect_interval_ms (default: 30 minutes)
+  // Returns true if work was found (insights/contradictions) → schedule sooner
   // -------------------------------------------------------------------
 
-  async function runReflect(): Promise<void> {
-    if (reflectRunning) return; // Prevent overlapping runs
-    if (!subagentRunner) return;
+  async function runReflect(): Promise<boolean> {
+    if (reflectRunning) return false;
+    if (!subagentRunner) return false;
 
     reflectRunning = true;
 
@@ -190,7 +214,7 @@ If no relationships found, return: []`;
 
       if (!recentMemories || recentMemories.length < 5) {
         logger.debug("Reflect: not enough memories to reflect on");
-        return;
+        return false;
       }
 
       // Step 2: Ask the LLM to identify patterns, insights, and contradictions
@@ -244,7 +268,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
         }
       } catch (parseError) {
         logger.warn(`Reflect: failed to parse LLM response: ${parseError}`);
-        return;
+        return false;
       }
 
       // Step 4: Save new insights as memory nodes
@@ -335,8 +359,10 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
           `Reflect: ${insightCount} insights, ${contradictionCount} contradictions resolved`,
         );
       }
+      return insightCount > 0 || contradictionCount > 0;
     } catch (error) {
       logger.error(`Reflect task failed: ${error}`);
+      return false;
     } finally {
       reflectRunning = false;
     }
@@ -344,7 +370,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
 
   // -------------------------------------------------------------------
   // SALIENCE DECAY — old memories gradually lose importance
-  // Runs alongside the linker (every 5 min, but only decays weekly)
+  // Piggybacks on linker schedule (pure DB, no LLM cost)
   // -------------------------------------------------------------------
 
   async function runSalienceDecay(): Promise<void> {
@@ -352,23 +378,64 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
       // Decay memories older than 7 days that haven't been recalled recently.
       // Multiply salience by 0.95 — a memory at 0.8 drops to 0.44 after 3 months.
       // Floor at 0.1 so no memory becomes completely invisible.
-      const result = await query<{ count: number }>(
-        `UPDATE memory SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
+      //
+      // SurrealDB best practice: indexes are NOT used in UPDATE...WHERE.
+      // Wrap in SELECT subquery so the index drives the filter, then UPDATE by ID.
+      const staleIds = await query<{ id: string }>(
+        `SELECT id FROM memory
          WHERE is_active = true
            AND salience > 0.15
-           AND updated_at < time::now() - 7d
-         RETURN NONE;
-         SELECT count() AS count FROM memory
-         WHERE is_active = true AND updated_at < time::now() - 7d
-         GROUP ALL;`,
+           AND updated_at < time::now() - 7d`,
       );
-      const decayed = result?.[0]?.count ?? 0;
-      if (decayed > 0) {
-        logger.info(`Salience decay: ${decayed} memories older than 7d`);
-      }
+
+      if (!staleIds || staleIds.length === 0) return;
+
+      await query(
+        `UPDATE $ids SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
+         RETURN NONE;`,
+        { ids: staleIds.map((r) => r.id) },
+      );
+
+      logger.info(`Salience decay: ${staleIds.length} memories decayed`);
     } catch (error) {
       logger.debug(`Salience decay failed: ${error}`);
     }
+  }
+
+  // -------------------------------------------------------------------
+  // Self-scheduling — each task decides when to run next based on
+  // whether it found work. Active → short delay, idle → long delay.
+  // -------------------------------------------------------------------
+
+  function scheduleLinker(delayMs: number) {
+    if (!running) return;
+    linkerTimeout = setTimeout(async () => {
+      linkerTimeout = null;
+      const hadWork = await runLinker();
+      await runSalienceDecay();
+      // Found work (edges created) → check again in 5 min (burst mode)
+      // No work → back off to configured interval (default 30 min)
+      const nextDelay = hadWork ? LINKER_ACTIVE_MS : config.linker_interval_ms;
+      if (hadWork) {
+        logger.debug(`Linker: work found, next run in ${nextDelay / 1000}s`);
+      }
+      scheduleLinker(nextDelay);
+    }, delayMs);
+  }
+
+  function scheduleReflect(delayMs: number) {
+    if (!running) return;
+    reflectTimeout = setTimeout(async () => {
+      reflectTimeout = null;
+      const hadWork = await runReflect();
+      // Found insights/contradictions → check again in 10 min
+      // No work → back off to configured interval (default 30 min)
+      const nextDelay = hadWork ? REFLECT_ACTIVE_MS : config.reflect_interval_ms;
+      if (hadWork) {
+        logger.debug(`Reflect: work found, next run in ${nextDelay / 1000}s`);
+      }
+      scheduleReflect(nextDelay);
+    }, delayMs);
   }
 
   // -------------------------------------------------------------------
@@ -379,31 +446,34 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
     id: "qmemory-linker",
 
     async start() {
-      // Start periodic tasks
-      linkerTimer = setInterval(() => {
-        runLinker();
-        runSalienceDecay(); // Piggyback on linker interval
-      }, config.linker_interval_ms);
-      reflectTimer = setInterval(runReflect, config.reflect_interval_ms);
+      running = true;
+
+      // Linker: first run after 5s (DB warmup), then self-scheduling
+      scheduleLinker(5000);
+
+      // Reflect: stagger by half the linker interval so they never
+      // compete for the subagent runner. With 30 min intervals:
+      // Linker at 0, 5, 10... or 30 (idle) — Reflect at 15, 25... or 45 (idle)
+      const staggerMs = Math.floor(config.linker_interval_ms / 2);
+      scheduleReflect(staggerMs);
 
       logger.info(
-        `Linker service started (link every ${config.linker_interval_ms / 1000}s, ` +
-        `reflect every ${config.reflect_interval_ms / 1000}s)`,
+        `Linker service started (self-scheduling: ` +
+        `linker ${LINKER_ACTIVE_MS / 1000}s active / ${config.linker_interval_ms / 1000}s idle, ` +
+        `reflect ${REFLECT_ACTIVE_MS / 1000}s active / ${config.reflect_interval_ms / 1000}s idle, ` +
+        `stagger ${staggerMs / 1000}s)`,
       );
-
-      // Run linker + salience decay on startup (after short delay for DB)
-      setTimeout(runLinker, 5000);
-      setTimeout(runSalienceDecay, 10000);
     },
 
     async stop() {
-      if (linkerTimer) {
-        clearInterval(linkerTimer);
-        linkerTimer = null;
+      running = false;
+      if (linkerTimeout) {
+        clearTimeout(linkerTimeout);
+        linkerTimeout = null;
       }
-      if (reflectTimer) {
-        clearInterval(reflectTimer);
-        reflectTimer = null;
+      if (reflectTimeout) {
+        clearTimeout(reflectTimeout);
+        reflectTimeout = null;
       }
       logger.info("Linker service stopped");
     },

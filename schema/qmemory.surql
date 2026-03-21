@@ -60,6 +60,7 @@ DEFINE FIELD IF NOT EXISTS is_active    ON memory TYPE bool           DEFAULT tr
 DEFINE FIELD IF NOT EXISTS confidence   ON memory TYPE float          DEFAULT 0.8;
 DEFINE FIELD IF NOT EXISTS source_type  ON memory TYPE string         DEFAULT "conversation";
 DEFINE FIELD IF NOT EXISTS prev_version ON memory TYPE option<record<memory>>;
+DEFINE FIELD IF NOT EXISTS linked       ON memory TYPE bool           DEFAULT false;
 DEFINE FIELD IF NOT EXISTS embedding    ON memory TYPE option<array<float>>;
 DEFINE FIELD IF NOT EXISTS created_at   ON memory TYPE datetime       DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at   ON memory TYPE datetime       DEFAULT time::now();
@@ -68,10 +69,12 @@ DEFINE FIELD IF NOT EXISTS updated_at   ON memory TYPE datetime       DEFAULT ti
 DEFINE ANALYZER IF NOT EXISTS qmemory_analyzer TOKENIZERS blank, class FILTERS lowercase;
 DEFINE INDEX IF NOT EXISTS idx_memory_content ON memory FIELDS content FULLTEXT ANALYZER qmemory_analyzer;
 
-DEFINE INDEX IF NOT EXISTS idx_memory_active    ON memory FIELDS is_active;
-DEFINE INDEX IF NOT EXISTS idx_memory_category  ON memory FIELDS category;
-DEFINE INDEX IF NOT EXISTS idx_memory_salience  ON memory FIELDS salience;
-DEFINE INDEX IF NOT EXISTS idx_memory_scope     ON memory FIELDS scope;
+DEFINE INDEX IF NOT EXISTS idx_memory_active     ON memory FIELDS is_active;
+DEFINE INDEX IF NOT EXISTS idx_memory_category   ON memory FIELDS category;
+DEFINE INDEX IF NOT EXISTS idx_memory_salience   ON memory FIELDS salience;
+DEFINE INDEX IF NOT EXISTS idx_memory_scope      ON memory FIELDS scope;
+DEFINE INDEX IF NOT EXISTS idx_memory_created_at ON memory FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS idx_memory_linked     ON memory FIELDS linked;
 
 -- ============================================================
 -- NODE: entity

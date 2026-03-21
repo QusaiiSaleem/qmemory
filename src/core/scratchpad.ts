@@ -7,7 +7,7 @@
  * Lives in the `scratchpad` table with a UNIQUE index on session.
  */
 
-import { query, generateId } from "../db/client.js";
+import { query } from "../db/client.js";
 import type { Scratchpad, QmemoryLogger } from "../config.js";
 
 /** Extract ID from string or RecordId: "session:s1234" → "s1234" */
@@ -70,38 +70,13 @@ export async function updateScratchpad(
       params.toolSummary = updates.tool_summary;
     }
 
-    // Use UPDATE ... WHERE with CREATE fallback (SurrealDB 3.0 compatible)
-    const existing = await query<{ id: string }>(
-      'SELECT id FROM scratchpad WHERE session = type::record("session", $sessionId) LIMIT 1',
-      { sessionId: sessionIdPart(sessionId) },
+    // SurrealDB best practice: UPSERT with unique index is much faster than
+    // SELECT-then-CREATE/UPDATE. The idx_scratchpad_session UNIQUE index makes
+    // this a single indexed operation instead of 2-3 queries.
+    await query(
+      `UPSERT scratchpad SET ${setClauses.join(", ")} WHERE session = type::record("session", $sessionId)`,
+      params,
     );
-
-    if (existing && existing.length > 0) {
-      await query(
-        `UPDATE scratchpad SET ${setClauses.join(", ")} WHERE session = type::record("session", $sessionId)`,
-        params,
-      );
-    } else {
-      const idPart = generateId("sp");
-      await query(
-        `CREATE type::record("scratchpad", $idPart) CONTENT {
-          session: type::record("session", $sessionId),
-          task_progress: $taskProgress,
-          key_findings: $keyFindings,
-          open_questions: $openQuestions,
-          tool_summary: $toolSummary,
-          updated_at: time::now()
-        }`,
-        {
-          idPart,
-          sessionId: sessionIdPart(sessionId),
-          taskProgress: updates.task_progress ?? "",
-          keyFindings: updates.key_findings ?? "",
-          openQuestions: updates.open_questions ?? "",
-          toolSummary: updates.tool_summary ?? "",
-        },
-      );
-    }
   } catch (error) {
     logger?.debug(`updateScratchpad failed: ${error}`);
   }
