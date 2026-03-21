@@ -61,6 +61,11 @@ DEFINE FIELD IF NOT EXISTS confidence   ON memory TYPE float          DEFAULT 0.
 DEFINE FIELD IF NOT EXISTS source_type  ON memory TYPE string         DEFAULT "conversation";
 DEFINE FIELD IF NOT EXISTS prev_version ON memory TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS linked       ON memory TYPE bool           DEFAULT false;
+DEFINE FIELD IF NOT EXISTS source_person  ON memory TYPE option<record<entity>>;
+DEFINE FIELD IF NOT EXISTS evidence_type  ON memory TYPE string         DEFAULT "observed";
+DEFINE FIELD IF NOT EXISTS recall_count   ON memory TYPE int            DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS last_recalled  ON memory TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS context_mood   ON memory TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS embedding    ON memory TYPE option<array<float>>;
 DEFINE FIELD IF NOT EXISTS created_at   ON memory TYPE datetime       DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at   ON memory TYPE datetime       DEFAULT time::now();
@@ -75,6 +80,9 @@ DEFINE INDEX IF NOT EXISTS idx_memory_salience   ON memory FIELDS salience;
 DEFINE INDEX IF NOT EXISTS idx_memory_scope      ON memory FIELDS scope;
 DEFINE INDEX IF NOT EXISTS idx_memory_created_at ON memory FIELDS created_at;
 DEFINE INDEX IF NOT EXISTS idx_memory_linked     ON memory FIELDS linked;
+DEFINE INDEX IF NOT EXISTS idx_memory_evidence_type ON memory FIELDS evidence_type;
+DEFINE INDEX IF NOT EXISTS idx_memory_recall_count  ON memory FIELDS recall_count;
+DEFINE INDEX IF NOT EXISTS idx_memory_source_person ON memory FIELDS source_person;
 
 -- ============================================================
 -- NODE: entity

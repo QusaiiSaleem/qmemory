@@ -58,6 +58,7 @@ export const MEMORY_CATEGORIES = [
   "idea",        // Future plans/suggestions
   "feedback",    // User corrections
   "domain",      // Sector/domain knowledge
+  "self",        // Agent's self-knowledge (soul)
 ] as const;
 
 export type MemoryCategory = typeof MEMORY_CATEGORIES[number];
@@ -101,6 +102,11 @@ export interface Memory {
   confidence: number;     // LLM confidence 0.0 - 1.0
   source_type: "conversation" | "workspace" | "agent" | "linker" | "reflect" | "cron";
   linked: boolean;        // Has been processed by linker (avoids expensive graph traversal)
+  source_person?: string;   // record<entity> FK — who said this
+  evidence_type: string;    // "observed" | "reported" | "inferred" | "self"
+  recall_count: number;     // Biological memory counter — incremented each time this is retrieved
+  last_recalled?: string;   // datetime of last recall
+  context_mood?: string;    // "calm_decision" | "heated_discussion" | "brainstorm" | "correction" | "casual" | "urgent"
   prev_version?: string;  // FK → memory:xxx (version chain)
   embedding?: number[];   // Optional vector
   created_at: string;
