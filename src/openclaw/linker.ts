@@ -205,10 +205,10 @@ If no relationships found, return: []`;
     reflectRunning = true;
 
     try {
-      // Step 1: Get the last 30 active memories
+      // Step 1: Get the last 30 active memories (exclude reflect outputs to avoid feedback loops)
       const recentMemories = await query<Memory>(
         `SELECT * FROM memory
-         WHERE is_active = true
+         WHERE is_active = true AND source_type != "reflect"
          ORDER BY created_at DESC
          LIMIT 30`,
       );
@@ -226,41 +226,69 @@ If no relationships found, return: []`;
         )
         .join("\n");
 
-      const prompt = `You are a memory analyst. Review these recent memories and identify:
+      const prompt = `You are the agent's background thinking process. You review recent memories and
+perform five types of cognitive work:
 
-1. INSIGHTS: Patterns or synthesized knowledge that connect multiple memories
-2. CONTRADICTIONS: Memories that conflict with each other
+1. PATTERNS — Recurring behaviors or rules that connect multiple memories.
+   Not just "these are related" but "this ALWAYS happens when X occurs."
+   Example: "Every time a Railway deploy fails, the root cause is timing not logic"
+
+2. CONTRADICTIONS — Memories that conflict with each other. Do NOT auto-resolve.
+   Flag both sides with the source person so the agent can ask the user.
+   Example: "Qusai said budget is 500K (mem:a) but Osama said 400K (mem:b)"
+
+3. COMPRESSIONS — Groups of 3+ similar old memories that can be merged into
+   one principle. The individual facts fade, the principle persists.
+   This is how the agent forgets details but remembers lessons.
+   Example: Merge "user said shorter" + "user said no summaries" + "user said concise"
+   → "This user strongly prefers brevity — no trailing summaries, no over-explanation"
+
+4. GHOST ENTITIES — Names, projects, or tools mentioned in 3+ memories but
+   never saved as an entity node. These deserve to be tracked.
+   Example: "MAZJ mentioned in 4 memories but has no entity node"
+
+5. SELF LEARNINGS — Meta-observations about how the agent is performing.
+   Look at feedback/correction memories and extract behavioral patterns:
+   - What communication style gets engagement?
+   - What mistakes keep recurring?
+   - What does the user value most about the agent's help?
+   Example: "Agent's Arabic responses get 3x more engagement than English"
 
 MEMORIES:
 ${memoryList}
 
 Return ONLY a JSON object (no other text):
 {
-  "insights": [
-    {"content": "synthesized insight", "based_on": ["memory:xxx", "memory:yyy"], "category": "context"}
+  "patterns": [
+    {"content": "The abstracted pattern or rule", "based_on": ["memory:xxx", "memory:yyy"], "category": "domain", "salience": 0.7}
   ],
   "contradictions": [
-    {"old_id": "memory:xxx", "new_id": "memory:yyy", "explanation": "why they conflict"}
+    {"memory_a": "memory:xxx", "memory_b": "memory:yyy", "person_a": "name", "person_b": "name", "explanation": "Why they conflict"}
+  ],
+  "compressions": [
+    {"merge_ids": ["memory:aaa", "memory:bbb", "memory:ccc"], "into": "The compressed principle", "category": "self"}
+  ],
+  "ghost_entities": [
+    {"name": "MAZJ", "type": "project", "mentioned_in": ["memory:xxx"], "mentioned_count": 4}
+  ],
+  "self_learnings": [
+    {"content": "The meta-observation", "evidence": "Brief explanation", "salience": 0.7}
   ]
 }
 
-If nothing found, return: {"insights": [], "contradictions": []}`;
+If nothing found for a category, use an empty array.
+Focus on quality over quantity — one real pattern is worth more than five weak ones.`;
 
       const response = await subagentRunner(prompt);
 
       // Step 3: Parse the response
       let analysis: {
-        insights: Array<{
-          content: string;
-          based_on: string[];
-          category: string;
-        }>;
-        contradictions: Array<{
-          old_id: string;
-          new_id: string;
-          explanation: string;
-        }>;
-      } = { insights: [], contradictions: [] };
+        patterns: Array<{ content: string; based_on: string[]; category: string; salience: number }>;
+        contradictions: Array<{ memory_a: string; memory_b: string; person_a?: string; person_b?: string; explanation: string }>;
+        compressions: Array<{ merge_ids: string[]; into: string; category: string }>;
+        ghost_entities: Array<{ name: string; type: string; mentioned_in: string[]; mentioned_count: number }>;
+        self_learnings: Array<{ content: string; evidence: string; salience: number }>;
+      } = { patterns: [], contradictions: [], compressions: [], ghost_entities: [], self_learnings: [] };
 
       try {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -272,95 +300,118 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
         return false;
       }
 
-      // Step 4: Save new insights as memory nodes
+      // Step 4: Process all 5 analysis jobs
       const validIds = recentMemories.map((m) => m.id);
 
-      for (const insight of analysis.insights ?? []) {
-        try {
-          const result = await saveMemory(
-            {
-              content: insight.content,
-              category: (insight.category || "context") as import("../config.js").MemoryCategory,
-              salience: 0.7,
-              scope: "global",
-              source_type: "reflect",
-            },
-            subagentRunner,
-          );
-
-          // Create `relates` edges from the insight to its source memories
-          if (result?.memory_id) {
-            for (const sourceId of insight.based_on ?? []) {
-              if (!validIds.includes(sourceId)) continue;
-              await query(
-                `LET $f = type::record($from); LET $t = type::record($to);
-                 RELATE $f->relates->$t CONTENT {
-                  type: "synthesized_from",
-                  reason: "Insight derived during reflection",
-                  confidence: 0.7,
-                  created_by: "reflect",
-                  created_at: time::now()
-                };`,
-                { from: result.memory_id, to: sourceId },
-              );
-            }
+      // --- PATTERNS: save as reflect memories with synthesized_from edges ---
+      for (const pattern of analysis.patterns ?? []) {
+        const result = await saveMemory({
+          content: pattern.content,
+          category: (pattern.category || "domain") as import("../config.js").MemoryCategory,
+          salience: pattern.salience ?? 0.7,
+          scope: "global",
+          source_type: "reflect",
+          evidence_type: "inferred",
+        }, subagentRunner);
+        if (result?.memory_id) {
+          for (const sourceId of pattern.based_on ?? []) {
+            if (!validIds.includes(sourceId)) continue;
+            await query(
+              `LET $f = type::record($from); LET $t = type::record($to);
+               RELATE $f->relates->$t CONTENT {
+                type: "synthesized_from", reason: "Pattern derived during reflection",
+                confidence: 0.7, created_by: "reflect", created_at: time::now()
+               };`,
+              { from: result.memory_id, to: sourceId },
+            );
           }
-        } catch (error) {
-          logger.warn(`Reflect: failed to save insight: ${error}`);
         }
       }
 
-      // Step 5: Handle contradictions — deactivate the old memory
-      for (const contradiction of analysis.contradictions ?? []) {
-        // Validate that both IDs exist in our working set
-        if (
-          !validIds.includes(contradiction.old_id) ||
-          !validIds.includes(contradiction.new_id)
-        ) {
-          continue;
-        }
+      // --- CONTRADICTIONS: flag both, DON'T auto-delete ---
+      for (const c of analysis.contradictions ?? []) {
+        if (!validIds.includes(c.memory_a) || !validIds.includes(c.memory_b)) continue;
+        await query(
+          `LET $f = type::record($from); LET $t = type::record($to);
+           RELATE $f->relates->$t CONTENT {
+            type: "contradicts", reason: $reason,
+            confidence: 0.8, created_by: "reflect", created_at: time::now()
+           };`,
+          { from: c.memory_b, to: c.memory_a, reason: c.explanation },
+        );
+        logger.info(`Reflect: flagged contradiction between ${c.memory_a} and ${c.memory_b}`);
+      }
 
-        try {
-          // Soft-delete the old (contradicted) memory
-          await query(
-            `UPDATE type::record($id) SET is_active = false, updated_at = time::now()`,
-            { id: contradiction.old_id },
-          );
+      // --- COMPRESSIONS: merge old facts into principle, soft-delete originals ---
+      for (const comp of analysis.compressions ?? []) {
+        const validMergeIds = comp.merge_ids.filter(id =>
+          validIds.includes(id) &&
+          recentMemories.find(m => String(m.id) === id)?.source_type !== "reflect"
+        );
+        if (validMergeIds.length < 2) continue;
 
-          // Create a `contradicts` edge from new → old
-          await query(
-            `LET $f = type::record($from); LET $t = type::record($to);
-             RELATE $f->relates->$t CONTENT {
-              type: "contradicts",
-              reason: $reason,
-              confidence: 0.8,
-              created_by: "reflect",
-              created_at: time::now()
-            };`,
-            {
-              from: contradiction.new_id,
-              to: contradiction.old_id,
-              reason: contradiction.explanation,
-            },
-          );
+        const result = await saveMemory({
+          content: comp.into,
+          category: (comp.category || "self") as import("../config.js").MemoryCategory,
+          salience: 0.7,
+          scope: "global",
+          source_type: "reflect",
+          evidence_type: "inferred",
+        }, subagentRunner);
 
-          logger.info(
-            `Reflect: resolved contradiction — deactivated ${contradiction.old_id}`,
-          );
-        } catch (error) {
-          logger.warn(`Reflect: failed to resolve contradiction: ${error}`);
+        if (result?.memory_id) {
+          for (const id of validMergeIds) {
+            await query(`UPDATE type::record($id) SET is_active = false, updated_at = time::now()`, { id });
+            await query(
+              `LET $f = type::record($from); LET $t = type::record($to);
+               RELATE $f->relates->$t CONTENT {
+                type: "synthesized_from", reason: "Compressed during reflection",
+                confidence: 0.7, created_by: "reflect", created_at: time::now()
+               };`,
+              { from: result.memory_id, to: id },
+            );
+          }
         }
       }
 
-      const insightCount = analysis.insights?.length ?? 0;
+      // --- GHOST ENTITIES: UPSERT to prevent duplicates ---
+      for (const ghost of analysis.ghost_entities ?? []) {
+        await query(
+          `UPSERT entity SET name = $name, type = $type,
+             updated_at = time::now(), created_at = created_at ?? time::now()
+           WHERE name = $name AND type = $type`,
+          { name: ghost.name, type: ghost.type },
+        );
+        logger.info(`Reflect: created ghost entity "${ghost.name}" (${ghost.type})`);
+      }
+
+      // --- SELF LEARNINGS: save as self category ---
+      for (const learning of analysis.self_learnings ?? []) {
+        await saveMemory({
+          content: learning.content,
+          category: "self",
+          salience: learning.salience ?? 0.7,
+          scope: "global",
+          source_type: "reflect",
+          evidence_type: "self",
+        }, subagentRunner);
+      }
+
+      // Step 5: Summary log
+      const patternCount = analysis.patterns?.length ?? 0;
       const contradictionCount = analysis.contradictions?.length ?? 0;
+      const compressionCount = analysis.compressions?.length ?? 0;
+      const ghostCount = analysis.ghost_entities?.length ?? 0;
+      const selfCount = analysis.self_learnings?.length ?? 0;
+      const totalWork = patternCount + contradictionCount + compressionCount + ghostCount + selfCount;
 
-      if (insightCount > 0 || contradictionCount > 0) {
+      if (totalWork > 0) {
         logger.info(
-          `Reflect: ${insightCount} insights, ${contradictionCount} contradictions resolved`,
+          `Reflect: ${patternCount} patterns, ${contradictionCount} contradictions, ` +
+          `${compressionCount} compressions, ${ghostCount} ghosts, ${selfCount} self-learnings`,
         );
       }
-      return insightCount > 0 || contradictionCount > 0;
+      return totalWork > 0;
     } catch (error) {
       logger.error(`Reflect task failed: ${error}`);
       return false;
@@ -376,29 +427,41 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
 
   async function runSalienceDecay(): Promise<void> {
     try {
-      // Decay memories older than 7 days that haven't been recalled recently.
-      // Multiply salience by 0.95 — a memory at 0.8 drops to 0.44 after 3 months.
-      // Floor at 0.1 so no memory becomes completely invisible.
-      //
-      // SurrealDB best practice: indexes are NOT used in UPDATE...WHERE.
-      // Wrap in SELECT subquery so the index drives the filter, then UPDATE by ID.
-      const staleIds = await query<{ id: string }>(
+      // Tier 1: Never recalled + old → fast decay (×0.90)
+      const neverRecalled = await query<{ id: string }>(
         `SELECT id FROM memory
-         WHERE is_active = true
-           AND salience > 0.15
+         WHERE is_active = true AND salience > 0.15
+           AND recall_count = 0
            AND updated_at < time::now() - 7d`,
       );
+      if (neverRecalled?.length) {
+        await query(
+          `UPDATE memory SET salience = math::max(salience * 0.90, 0.1),
+             updated_at = time::now()
+           WHERE id IN $ids`,
+          { ids: neverRecalled.map(r => r.id) },
+        );
+        logger.info(`Salience decay: ${neverRecalled.length} never-recalled memories decayed (×0.90)`);
+      }
 
-      if (!staleIds || staleIds.length === 0) return;
-
-      // SurrealDB 3.0: UPDATE doesn't accept array params — use WHERE id IN
-      await query(
-        `UPDATE memory SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
-         WHERE id IN $ids`,
-        { ids: staleIds.map((r) => r.id) },
+      // Tier 2: Recalled but stale (last_recalled > 14d) → slow decay (×0.98)
+      const staleRecalled = await query<{ id: string }>(
+        `SELECT id FROM memory
+         WHERE is_active = true AND salience > 0.15
+           AND recall_count > 0
+           AND last_recalled < time::now() - 14d`,
       );
+      if (staleRecalled?.length) {
+        await query(
+          `UPDATE memory SET salience = math::max(salience * 0.98, 0.1),
+             updated_at = time::now()
+           WHERE id IN $ids`,
+          { ids: staleRecalled.map(r => r.id) },
+        );
+        logger.info(`Salience decay: ${staleRecalled.length} stale-recalled memories decayed (×0.98)`);
+      }
 
-      logger.info(`Salience decay: ${staleIds.length} memories decayed`);
+      // Tier 3: Recalled 5+ times → cemented, never below 0.5 (no decay applied)
     } catch (error) {
       logger.debug(`Salience decay failed: ${error}`);
     }
