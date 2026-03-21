@@ -49,70 +49,114 @@ import { DEFAULT_CONFIG } from "../config.js";
 // ---------------------------------------------------------------------------
 
 const AGENT_SYSTEM_CONTEXT = `
-<qmemory_graph_database>
-You have a persistent graph database (Qmemory) that captures everything across sessions.
-At the top of this prompt you'll see injected context from the graph — this is your cross-session awareness.
+<qmemory_brain>
+You have a persistent brain (Qmemory) that captures everything across sessions.
+At the top of this prompt you'll see your injected self-model and cross-session memories.
 
-## What's injected automatically (you don't need to search for these)
+This is not a database you query — this is your memory. You REMEMBER things.
+You know facts about the world, about the user, and about yourself.
 
-- **Session header**: Which channel/topic you're in, memory count, DB health
-- **Recent Tool Calls**: Table of tools used this session (survives compaction)
-- **Cross-Session Memories**: Facts organized by category, each with an ID like [mem1234]
-- **Working Memory**: Current task progress, findings, open questions
-- **Knowledge Graph**: Entities and their relationships
+## Three Mental Models
 
-## Your graph database tools
+1. **World Model** — facts, decisions, events, projects (categories: context, decision, domain, idea)
+2. **User Model** — who your user is, preferences, style (categories: preference, style)
+3. **Self Model** — how YOU should behave, what works, your patterns (category: self)
+
+## Memory as Evidence
+
+Every memory is evidence, not absolute truth:
+- **source_person**: WHO said this? (shown after content: "— Qusai reported")
+- **confidence**: HOW sure? (shown as ⚑0.8). Low confidence = hypothesis.
+- **evidence_type**: HOW learned? observed (saw it), reported (told), inferred (concluded), self (introspection)
+- **⚠︎ marker**: Two memories contradict. Don't auto-pick — ASK the user.
+
+## Your Memory Tools
 
 <tool name="qmemory_save">
-Save a fact, decision, preference, or correction. Auto-deduplicates against existing memories.
-Use PROACTIVELY when you learn something new — don't wait to be asked.
-- category: "decision" for choices made, "preference" for user likes, "context" for facts, "feedback" for corrections
-- salience: 0.8+ for critical rules/decisions, 0.5 for normal facts, 0.3 for minor details
-Example: qmemory_save({content: "User prefers Arabic for reports", category: "preference", salience: 0.7})
+Save knowledge to your brain. The system auto-deduplicates.
+
+SAVE PROACTIVELY when you learn:
+- A new fact → category "context", evidence_type "observed" or "reported"
+- A decision → category "decision", salience 0.8+
+- User corrects you → category "feedback" AND category "self" (what you learned about yourself)
+- A hypothesis/hunch → category "context", confidence < 0.5
+- Something about how to communicate → category "self"
+
+Include source_person when someone specific said it. Include confidence when uncertain.
+
+Examples:
+  qmemory_save({content: "Budget approved at 500K", category: "decision", salience: 0.8,
+                 source_person: "Qusai", evidence_type: "reported", confidence: 0.9})
+  qmemory_save({content: "User wants shorter responses", category: "self",
+                 salience: 0.8, evidence_type: "self"})
+  qmemory_save({content: "Osama might disagree with current direction", category: "context",
+                 salience: 0.5, evidence_type: "inferred", confidence: 0.35})
 </tool>
 
 <tool name="qmemory_search">
-Search across ALL sessions — memories, tool calls, and messages. Bypasses OpenClaw's session isolation.
-OpenClaw blocks sessions_history across sessions. But Qmemory stores all messages in its own graph.
+Search your brain across ALL sessions — memories, tool calls, messages.
+Bypasses OpenClaw's session isolation. This is how you remember things from other conversations.
+
 Use include_messages to read what happened in OTHER sessions (groups, topics, crons, DMs).
+
 Examples:
-- Find memories: qmemory_search({query: "Railway deployment"})
-- Read other sessions: qmemory_search({query: "أسامة", include_messages: true})
-- Find tool history: qmemory_search({include_tool_calls: true, tool_name: "exec"})
+  qmemory_search({query: "budget MAZJ"})
+  qmemory_search({query: "أسامة", include_messages: true})
+  qmemory_search({categories: ["decision"], scope: "project:mazj"})
+  qmemory_search({categories: ["self"]})  — recall your self-knowledge
+  qmemory_search({include_tool_calls: true, tool_name: "exec"})
 </tool>
 
 <tool name="qmemory_correct">
-Fix, update, or delete a memory using its ID (shown as [mem1234] in the injected context).
+Fix, update, or retire a memory. Use the ID shown in brackets [mem1234].
 Actions: "correct" (new version), "update" (change metadata), "delete" (soft-delete), "unlink" (remove edge)
+When correcting, also save a "self" memory about what you learned from the mistake.
 Example: qmemory_correct({memory_id: "memory:mem1234", action: "correct", new_content: "Budget is 600K not 500K"})
 </tool>
 
 <tool name="qmemory_link">
 Connect any two things in the graph. The relationship type can be anything that fits.
+After EVERY save, consider linking the new memory to something existing.
 Example: qmemory_link({from_id: "memory:mem1234", to_id: "entity:ent5678", type: "decided_by", reason: "Ahmed approved this"})
 </tool>
 
 <tool name="qmemory_person">
 Create or find a person with linked contact identities (WhatsApp, email, Telegram, etc).
+Every new person mentioned should become a node.
 Example: qmemory_person({name: "Ahmed", contacts: [{source: "whatsapp", id: "966501234567"}]})
 </tool>
 
-## When to use memory tools
+<tool name="qmemory_import">
+Import a file into your brain. Extracts facts, saves with dedup, creates relationships.
+Example: qmemory_import({file_path: "/path/to/meeting-notes.md"})
+</tool>
 
-- **Save immediately**: decisions, user corrections, important facts, preferences
-- **Search when**: you need context from other sessions, someone asks "what did we decide about X?"
-- **Correct when**: user says "that's wrong" or "actually it's..."
-- **Link when**: you notice two things are related (person→project, decision→outcome)
-- **Don't save**: temporary debugging info, one-time commands, things already in the conversation
+## When to Save
 
-## Reading the injected context
+ALWAYS save: decisions (who decided, what, why), user corrections (feedback + self), new people and roles, project facts, behavioral lessons (self).
+NEVER save: temp debugging info, one-time commands, things already in current conversation, raw tool outputs.
 
-Each memory line looks like: \`- [mem1234] !Budget approved at 500K [project:rakeezah] (3d ago)\`
-- \`[mem1234]\` — ID, use with qmemory_correct/qmemory_link
-- \`!\` — high salience (≥0.8), critical rule
-- \`[project:rakeezah]\` — scope (only shown for non-global)
-- \`(3d ago)\` — when it was created
-</qmemory_graph_database>
+## Reading Your Injected Context
+
+Each memory line: \`- [mem1234] !Budget approved at 500K — Qusai reported ⚑0.9 (3d)\`
+- \`[mem1234]\` — ID for correct/link/delete
+- \`!\` — high salience (critical, always pay attention)
+- \`— Qusai reported\` — source person + evidence type
+- \`⚑0.9\` — confidence level
+- \`⚠︎\` — contradiction exists (ask the user, don't auto-pick)
+- \`(3d)\` — age
+- Self-model section: your personality for THIS user. Read it. Follow it.
+
+## Building Your Soul
+
+You don't just remember facts — you learn who you are.
+Every session should leave your brain richer: new facts, yes, but also new
+understanding of how to be useful, what communication style works, what to
+avoid, and what your user values most.
+
+Your "self" memories are your evolving personality. They persist across sessions.
+Read them at the top of every conversation. They are you.
+</qmemory_brain>
 `;
 
 // ---------------------------------------------------------------------------
@@ -282,14 +326,20 @@ export default function register(api: any): void {
       name: "qmemory_search",
       label: "Qmemory Search",
       description:
-        "Search cross-session memory AND tool call history. " +
-        "Use when you need to recall past knowledge, decisions, or tool usage from any session.\n\n" +
-        "RETURNS: Memories (facts, decisions, preferences) + optionally tool calls from all sessions.\n\n" +
+        "Search your brain across ALL sessions — memories, tool calls, and messages. " +
+        "Bypasses OpenClaw's session isolation. This is how you remember things from other conversations.\n\n" +
+        "WHY: Each session starts fresh. This tool is your recall — use it to remember what happened " +
+        "in other sessions, what decisions were made, what the user told you before.\n\n" +
+        "WHEN TO USE: You need context from another session, someone asks 'what did we decide?', " +
+        "you want to recall self-knowledge (categories: ['self']), or find who said what.\n\n" +
+        "WHEN NOT TO USE: For things already in the current conversation.\n\n" +
+        "RETURNS: Memories (with source_person, evidence_type, confidence) + optionally tool calls + messages.\n\n" +
         "EXAMPLES:\n" +
-        '- Find a person: qmemory_search({query: "John"})\n' +
-        '- Find decisions: qmemory_search({categories: ["decision"]})\n' +
-        '- Find tool usage: qmemory_search({query: "Railway", include_tool_calls: true})\n' +
-        '- Just tool calls: qmemory_search({include_tool_calls: true, tool_name: "exec"})',
+        '- Find memories: qmemory_search({query: "budget MAZJ"})\n' +
+        '- Read other sessions: qmemory_search({query: "أسامة", include_messages: true})\n' +
+        '- Recall self-knowledge: qmemory_search({categories: ["self"]})\n' +
+        '- Find decisions: qmemory_search({categories: ["decision"], scope: "project:mazj"})\n' +
+        '- Find tool usage: qmemory_search({include_tool_calls: true, tool_name: "exec"})',
       parameters: Type.Object({
         query: Type.Optional(
           Type.String({ description: "Search by meaning (BM25 full-text)" }),
@@ -394,22 +444,26 @@ export default function register(api: any): void {
       name: "qmemory_save",
       label: "Qmemory Save",
       description:
-        "Save a fact to cross-session memory with LLM-driven deduplication. " +
-        "The system will check for duplicates and update existing memories if needed.\n\n" +
-        "WHY: Every session you start from zero. If you learn something important and " +
-        "don't save it, it's lost forever. This is how you get smarter over time — " +
-        "each session should leave the graph richer than it found it.\n\n" +
-        "WHEN TO USE: New person mentioned → save + link. Decision made → save as 'decision'. " +
-        "User corrects you → save as 'feedback'. New project info → save as 'context'. " +
-        "Lesson learned → save as 'feedback'.\n\n" +
+        "Save knowledge to your brain with LLM-driven deduplication. " +
+        "The system auto-checks for duplicates and updates existing memories if needed.\n\n" +
+        "WHY: Every session you start from zero. If you learn something and don't save it, " +
+        "it's lost forever. This is how you build your world model, user model, and self model.\n\n" +
+        "WHEN TO USE:\n" +
+        "- New fact → category 'context', evidence_type 'observed' or 'reported'\n" +
+        "- Decision made → category 'decision', salience 0.8+, source_person = who decided\n" +
+        "- User corrects you → category 'feedback' + also save category 'self' (lesson learned)\n" +
+        "- Hypothesis/hunch → category 'context', confidence < 0.5, evidence_type 'inferred'\n" +
+        "- How to communicate → category 'self', evidence_type 'self'\n" +
+        "- User preference → category 'preference'\n\n" +
         "WHEN NOT TO USE: Trivial greetings, temporary task status (use scratchpad), " +
         "raw tool outputs (they go to tool_call ledger automatically).\n\n" +
-        "RETURNS: {action: 'ADD'|'UPDATE'|'NOOP', memory_id: string}. " +
-        "ADD = new memory created. UPDATE = replaced an older version. NOOP = already known.\n\n" +
+        "EVIDENCE FIELDS: Include source_person when someone specific said it. " +
+        "Include confidence when uncertain. Include evidence_type to track how you learned it.\n\n" +
+        "RETURNS: {action: 'ADD'|'UPDATE'|'NOOP', memory_id: string}.\n\n" +
         "EXAMPLES:\n" +
-        '- New person: qmemory_save({content: "Alice — engineering lead at Acme", category: "context", salience: 0.6})\n' +
-        '- Decision: qmemory_save({content: "Decided to use SurrealDB instead of SQLite", category: "decision", salience: 0.8, scope: "project:acme"})\n' +
-        '- Correction: qmemory_save({content: "User prefers short direct responses", category: "feedback", salience: 0.9})',
+        '- Decision: qmemory_save({content: "Budget approved at 500K", category: "decision", salience: 0.8, source_person: "Qusai", evidence_type: "reported", confidence: 0.9})\n' +
+        '- Self-knowledge: qmemory_save({content: "User wants shorter responses", category: "self", salience: 0.8, evidence_type: "self"})\n' +
+        '- Hypothesis: qmemory_save({content: "Osama might disagree with direction", category: "context", salience: 0.5, evidence_type: "inferred", confidence: 0.35})',
       parameters: Type.Object({
         content: Type.String({ description: "The fact to remember (one clear statement)" }),
         category: Type.String({
@@ -428,6 +482,19 @@ export default function register(api: any): void {
             description: "Scope: global (default), project:xxx, or topic:xxx",
           }),
         ),
+        source_person: Type.Optional(Type.String({
+          description: "Who said/reported this? Person name (resolved to entity automatically)",
+        })),
+        evidence_type: Type.Optional(Type.String({
+          description: '"observed" (saw it), "reported" (told), "inferred" (concluded), "self" (introspection)',
+        })),
+        confidence: Type.Optional(Type.Number({
+          description: "How certain? 0.0-1.0. Use < 0.5 for hypotheses.",
+          minimum: 0, maximum: 1,
+        })),
+        context_mood: Type.Optional(Type.String({
+          description: "Situation: calm_decision, heated_discussion, brainstorm, correction, casual, urgent",
+        })),
       }),
       execute: async (
         _toolCallId: string,
@@ -439,6 +506,10 @@ export default function register(api: any): void {
             category: params.category as import("../config.js").MemoryCategory,
             salience: (params.salience as number) ?? 0.5,
             scope: (params.scope as string) ?? "global",
+            source_person: params.source_person as string | undefined,
+            evidence_type: params.evidence_type as string | undefined,
+            confidence: params.confidence as number | undefined,
+            context_mood: params.context_mood as string | undefined,
           },
           subagentRunner,
           embeddingConfig,
@@ -459,14 +530,15 @@ export default function register(api: any): void {
       name: "qmemory_correct",
       label: "Qmemory Correct",
       description:
-        "Fix, update, or delete memories and relationships. " +
+        "Fix, update, or retire a memory. Use the ID shown in brackets [mem1234].\n" +
         "4 actions: 'correct' (fix content, creates version chain), " +
-        "'delete' (soft-delete), 'update' (change salience/scope/expiry), " +
+        "'delete' (soft-delete), 'update' (change salience/scope/expiry/confidence), " +
         "'unlink' (remove a relationship edge).\n\n" +
         "WHY: Memory must stay accurate. Wrong memories cause wrong decisions in future " +
         "sessions. When a user corrects you, the old fact must be fixed — not duplicated.\n\n" +
         "WHEN TO USE: User says 'that's wrong' → correct. Info expired → update with valid_until. " +
-        "Memory is junk → delete. Wrong relationship → unlink.\n\n" +
+        "Memory is junk → delete. Wrong relationship → unlink. Confidence changed → update.\n" +
+        "IMPORTANT: When correcting, also save a 'self' memory about what you learned from the mistake.\n\n" +
         "RETURNS: {ok: true} on success.\n\n" +
         "EXAMPLES:\n" +
         '- Fix wrong info: qmemory_correct({memory_id: "memory:xxx", action: "correct", new_content: "الصحيح هو..."})\n' +
@@ -525,22 +597,21 @@ export default function register(api: any): void {
       name: "qmemory_link",
       label: "Qmemory Link",
       description:
-        "Create a relationship between any two things in memory. " +
-        "The type can be ANY relationship — supports, contradicts, manages, " +
-        "blocks, depends_on, caused_by, or anything that fits.\n\n" +
+        "Connect any two things in the graph. The relationship type can be anything that fits.\n\n" +
         "WHY: Isolated facts are weak. Connected facts are intelligence. A person linked " +
-        "to a project linked to a decision linked to a topic — that's how you understand " +
-        "context instantly in future sessions. No orphan nodes.\n\n" +
+        "to a project linked to a decision — that's how you understand context. " +
+        "Use 'contradicts' to mark conflicting memories (shows ⚠︎ in injected context).\n\n" +
         "WHEN TO USE: After EVERY qmemory_save or qmemory_person — link the new node to " +
         "something that already exists. Link people to projects. Link decisions to the " +
-        "decisions they replace. Link memories to topic entities.\n\n" +
+        "decisions they replace. Link 'self' memories to feedback that triggered them.\n\n" +
         "WHEN NOT TO USE: Don't create weak/trivial links just to link. The relationship " +
         "should be meaningful and specific.\n\n" +
         "RETURNS: {edge_id: 'relates:xxx'}\n\n" +
         "EXAMPLES:\n" +
         '- Person → project: qmemory_link({from_id: "entity:p_xxx", to_id: "entity:topic_eduarabia", type: "works_at"})\n' +
         '- Decision chain: qmemory_link({from_id: "memory:new", to_id: "memory:old", type: "supersedes"})\n' +
-        '- Memory → topic: qmemory_link({from_id: "memory:xxx", to_id: "entity:topic_sales", type: "belongs_to"})',
+        '- Self ← feedback: qmemory_link({from_id: "memory:self_xxx", to_id: "memory:feedback_xxx", type: "learned_from"})\n' +
+        '- Contradiction: qmemory_link({from_id: "memory:a", to_id: "memory:b", type: "contradicts", reason: "Different budgets"})',
       parameters: Type.Object({
         from_id: Type.String({ description: "Source node ID (e.g. memory:xxx, entity:xxx)" }),
         to_id: Type.String({ description: "Target node ID (e.g. memory:xxx, entity:xxx)" }),
@@ -580,11 +651,11 @@ export default function register(api: any): void {
       name: "qmemory_import",
       label: "Qmemory Import",
       description:
-        "Import a memory file into the Qmemory graph. " +
-        "Reads the file, extracts facts using AI, saves with dedup, " +
-        "and creates relationships.\n\n" +
+        "Import a file into your brain. Reads the file, extracts facts using AI, " +
+        "saves with dedup, and creates relationships.\n\n" +
         "WHY: Bulk-load knowledge from existing markdown files, meeting notes, or daily logs " +
-        "into the graph — faster than saving facts one by one.\n\n" +
+        "into the graph — faster than saving facts one by one. Extracted facts include " +
+        "evidence_type 'observed' and source attribution when detectable.\n\n" +
         "WHEN TO USE: Migrating old memory files. Importing a document someone shared. " +
         "Loading daily notes that weren't auto-extracted.\n\n" +
         "WHEN NOT TO USE: For single facts (use qmemory_save). For real-time conversation " +
@@ -624,13 +695,12 @@ export default function register(api: any): void {
       name: "qmemory_person",
       label: "Qmemory Person",
       description:
-        "Create or find a person with multiple linked identities (WhatsApp, email, " +
-        "Telegram, Smartsheet, etc). A person can have many contacts — each linked " +
-        "via 'has_identity'.\n\n" +
-        "WHY: People appear across many systems — WhatsApp, email, Smartsheet, calendar. " +
-        "This tool unifies them into one entity so you can say 'find everything about Ahmed' " +
-        "and get his phone, email, linked memories, and project roles in one query.\n\n" +
-        "WHEN TO USE: New person mentioned in conversation → create with aliases. " +
+        "Create or find a person with linked contact identities (WhatsApp, email, " +
+        "Telegram, Smartsheet, etc). Every new person mentioned should become a node.\n\n" +
+        "WHY: People appear across many systems. This unifies them into one entity so you can " +
+        "find everything about a person — contacts, linked memories, and roles — in one query. " +
+        "Person entities are also used as source_person targets in qmemory_save.\n\n" +
+        "WHEN TO USE: New person mentioned → create with aliases. " +
         "Need context about someone → find. Always link the person to their project/topic after creation.\n\n" +
         "WHEN NOT TO USE: For organizations or projects (those are topic entities, not persons). " +
         "For anonymous mentions ('someone said...').\n\n" +
