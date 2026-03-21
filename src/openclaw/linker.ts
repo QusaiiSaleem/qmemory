@@ -391,7 +391,7 @@ If nothing found, return: {"insights": [], "contradictions": []}`;
       if (!staleIds || staleIds.length === 0) return;
 
       await query(
-        `UPDATE $ids SET salience = math::max(salience * 0.95, 0.1), updated_at = time::now()
+        `UPDATE $ids SET salience = math::max([salience * 0.95, 0.1]), updated_at = time::now()
          RETURN NONE;`,
         { ids: staleIds.map((r) => r.id) },
       );
