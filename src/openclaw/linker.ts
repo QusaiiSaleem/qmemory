@@ -222,6 +222,29 @@ If no relationships found, return: []`;
     reflectRunning = true;
 
     try {
+      // One-time identity summary after discovery mode ends (72-168h window)
+      try {
+        const firstMemory = await query<{ created_at: string }>(
+          "SELECT created_at FROM memory ORDER BY created_at ASC LIMIT 1",
+        );
+        const firstDate = firstMemory?.[0]?.created_at;
+        const hoursSinceFirst = firstDate
+          ? (Date.now() - new Date(firstDate).getTime()) / 3_600_000
+          : 0;
+
+        if (hoursSinceFirst >= 72 && hoursSinceFirst < 168) {
+          const existing = await query(
+            `SELECT id FROM memory WHERE category = "self"
+             AND content ~ "Identity Summary" AND is_active = true LIMIT 1`,
+          );
+          if (!existing?.length) {
+            await runIdentitySummary();
+          }
+        }
+      } catch (e) {
+        logger.debug(`Identity summary check failed: ${e}`);
+      }
+
       // Step 1: Get the last 30 active memories (exclude reflect outputs to avoid feedback loops)
       const recentMemories = await query<Memory>(
         `SELECT * FROM memory
@@ -481,6 +504,84 @@ Focus on quality over quantity — one real pattern is worth more than five weak
       // Tier 3: Recalled 5+ times → cemented, never below 0.5 (no decay applied)
     } catch (error) {
       logger.debug(`Salience decay failed: ${error}`);
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // IDENTITY SUMMARY — One-time synthesis after discovery mode ends
+  // Runs inside runReflect() when 72–168h have passed since first memory.
+  // Creates two high-salience memories: user profile + agent soul.
+  // -------------------------------------------------------------------
+
+  async function runIdentitySummary(): Promise<void> {
+    if (!subagentRunner) return;
+
+    const allMemories = await query<Memory>(
+      "SELECT * FROM memory WHERE is_active = true ORDER BY salience DESC LIMIT 50",
+    );
+    if (!allMemories?.length) return;
+
+    const memList = allMemories
+      .map((m) => `  "${m.content}" [${m.category}, salience: ${m.salience}]`)
+      .join("\n");
+
+    const prompt = `You are summarizing what the agent has learned about its user and about itself
+during its first 72 hours. This will be presented to the user for validation.
+
+Review these memories and create two summaries:
+
+1. USER IDENTITY: Who is this person? Role, projects, people they work with,
+   tools they use, communication preferences.
+
+2. AGENT SOUL: How should the agent behave with this person? What communication
+   style works? What to avoid? What is the agent's most valued contribution?
+
+MEMORIES:
+${memList}
+
+Return a JSON object:
+{
+  "user_summary": "A paragraph describing the user",
+  "agent_soul": "A paragraph describing how the agent should behave",
+  "confidence": 0.7,
+  "gaps": ["Questions still unanswered"]
+}`;
+
+    const response = await subagentRunner(prompt);
+
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return;
+      const result = JSON.parse(jsonMatch[0]);
+
+      await saveMemory(
+        {
+          content: `[Identity Summary — User] ${result.user_summary}`,
+          category: "context" as import("../config.js").MemoryCategory,
+          salience: 0.9,
+          scope: "global",
+          source_type: "reflect",
+          evidence_type: "inferred",
+          confidence: result.confidence ?? 0.7,
+        },
+        subagentRunner,
+      );
+
+      await saveMemory(
+        {
+          content: `[Identity Summary — Agent Soul] ${result.agent_soul}`,
+          category: "self" as import("../config.js").MemoryCategory,
+          salience: 0.95,
+          scope: "global",
+          source_type: "reflect",
+          evidence_type: "self",
+        },
+        subagentRunner,
+      );
+
+      logger.info("Reflect: identity summary created after discovery mode");
+    } catch (e) {
+      logger.warn(`Reflect: identity summary parse failed: ${e}`);
     }
   }
 
