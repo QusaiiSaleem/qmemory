@@ -51,6 +51,14 @@ export interface SaveParams {
   source_type?: Memory["source_type"];
   /** Session ID for metrics tracking (optional, fire-and-forget) */
   sessionId?: string;
+  /** Person name — resolved to entity record link */
+  source_person?: string;
+  /** How the fact was obtained: observed, reported, inferred, or self */
+  evidence_type?: string;
+  /** LLM confidence in the fact (0.0–1.0) */
+  confidence?: number;
+  /** Situational context (e.g. mood, setting) */
+  context_mood?: string;
 }
 
 export interface SaveResult {
@@ -89,8 +97,27 @@ export async function saveMemory(
 
   logger.debug(`Save: found ${candidates.length} candidates for dedup`);
 
+  // --- Resolve source_person name → entity record reference (case-insensitive) ---
+  let sourcePersonRef: string | undefined;
+  if (params.source_person) {
+    const person = await query<{ id: string }>(
+      `SELECT id FROM entity WHERE type = "person"
+       AND (string::lowercase(name) = string::lowercase($name)
+         OR $name IN aliases) LIMIT 1`,
+      { name: params.source_person },
+    );
+    if (person?.[0]?.id) {
+      sourcePersonRef = String(person[0].id);
+    }
+  }
+
   // --- Step 2: Run dedup to decide what to do ---
-  const decision = await dedup(content, candidates, subagentRunner);
+  const decision = await dedup(content, candidates, subagentRunner, {
+    category: params.category,
+    confidence: params.confidence,
+    source_person: params.source_person,
+    evidence_type: params.evidence_type,
+  });
   logger.info(`Save: dedup decision = ${decision.action} (confidence: ${decision.confidence})`);
 
   // --- Step 3: Execute the decision ---
@@ -106,6 +133,22 @@ export async function saveMemory(
     const existingId = decision.target_id ?? candidates[0]?.id ?? "";
     logger.debug(`Save: NOOP — memory already exists as ${existingId}`);
     return { action: "NOOP", memory_id: existingId };
+  }
+
+  // --- Build optional evidence fields (SurrealDB 3.0: omit nulls for option<> fields) ---
+  const evidenceFields: string[] = [];
+  const evidenceParams: Record<string, unknown> = {};
+  if (sourcePersonRef) {
+    evidenceFields.push("source_person: type::record($sourcePerson),");
+    evidenceParams.sourcePerson = sourcePersonRef;
+  }
+  if (params.evidence_type) {
+    evidenceFields.push("evidence_type: $evidenceType,");
+    evidenceParams.evidenceType = params.evidence_type;
+  }
+  if (params.context_mood) {
+    evidenceFields.push("context_mood: $contextMood,");
+    evidenceParams.contextMood = params.context_mood;
   }
 
   if (decision.action === "UPDATE" && decision.target_id) {
@@ -127,6 +170,7 @@ export async function saveMemory(
         is_active: true,
         confidence: $confidence,
         source_type: $sourceType,
+        ${evidenceFields.join("\n          ")}
         prev_version: type::record($prevVersion),
         created_at: time::now(),
         updated_at: time::now()
@@ -137,9 +181,10 @@ export async function saveMemory(
         category,
         salience,
         scope,
-        confidence: decision.confidence,
+        confidence: params.confidence ?? decision.confidence,
         sourceType: source_type,
         prevVersion: decision.target_id,
+        ...evidenceParams,
       },
     );
 
@@ -176,8 +221,9 @@ export async function saveMemory(
       salience: $salience,
       scope: $scope,
       is_active: true,
-      confidence: 0.8,
+      confidence: $confidence,
       source_type: $sourceType,
+      ${evidenceFields.join("\n        ")}
       created_at: time::now(),
       updated_at: time::now()
     };`,
@@ -187,7 +233,9 @@ export async function saveMemory(
       category,
       salience,
       scope,
+      confidence: params.confidence ?? 0.8,
       sourceType: source_type,
+      ...evidenceParams,
     },
   );
 
