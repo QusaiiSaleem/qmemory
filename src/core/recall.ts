@@ -142,20 +142,19 @@ async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
 
   if (words.length === 0) return [];
 
-  // Find memories connected to entities whose names match query words
+  // Find memories connected to entities whose names match query words.
+  // SurrealDB 3.0: use explicit edge table query instead of <-relates<-.id arrow syntax.
   const surql = `
     LET $entities = (
-      SELECT id FROM entity
+      SELECT VALUE id FROM entity
       WHERE ${words.map((_, i) => `name CONTAINS $w${i}`).join(" OR ")}
       LIMIT 10
     );
+    LET $linked = (SELECT VALUE in FROM relates WHERE out IN $entities);
     SELECT * FROM memory
     WHERE is_active = true
       AND (valid_until IS NONE OR valid_until > time::now())
-      AND id IN (
-        SELECT VALUE <-relates<-.id FROM $entities
-        WHERE <-relates<-.id IS NOT NONE
-      )[0] ?? []
+      AND id IN $linked
     ORDER BY salience DESC
     LIMIT 15;
   `;
