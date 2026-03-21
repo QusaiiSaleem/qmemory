@@ -91,14 +91,17 @@ export function createLinkerService(
       }
 
       // Step 3: Ask the LLM which memories are related
+      // Include evidence_type and source_person so the LLM can infer
+      // richer relationship types (e.g. "stated_by", "supports" for corroboration)
       const unlinkedList = unlinked
-        .map((m) => `  ${m.id}: "${m.content}" [${m.category}]`)
+        .map((m) => `  ${m.id}: "${m.content}" [${m.category}, ${m.evidence_type ?? "observed"}, source: ${m.source_person ?? "system"}]`)
         .join("\n");
       const candidateList = candidates
-        .map((m) => `  ${m.id}: "${m.content}" [${m.category}]`)
+        .map((m) => `  ${m.id}: "${m.content}" [${m.category}, ${m.evidence_type ?? "observed"}, source: ${m.source_person ?? "system"}]`)
         .join("\n");
 
-      const prompt = `You are a memory graph builder. Given two lists of memories, identify meaningful relationships between them.
+      const prompt = `You are a memory graph builder. Given two lists of memories, identify meaningful
+relationships between them.
 
 UNLINKED MEMORIES (need connections):
 ${unlinkedList}
@@ -109,10 +112,24 @@ ${candidateList}
 For each relationship you find, specify:
 - from_id: the unlinked memory ID
 - to_id: the candidate memory ID
-- type: the relationship (supports, contradicts, elaborates, depends_on, caused_by, blocks, related_to, or any type that fits)
+- type: the relationship type (see options below)
 - reason: brief explanation (1 sentence)
 
-Only include MEANINGFUL relationships — not every memory is related.
+RELATIONSHIP TYPES:
+- supports / contradicts / elaborates — evidence relationships
+- depends_on / caused_by / blocks — causal chains
+- supersedes / replaces — version relationships
+- part_of / belongs_to — hierarchical
+- stated_by — if source_person matches an entity
+- related_to — fallback for genuine but uncategorized connections
+- Or any type that fits — you are not limited to this list.
+
+RULES:
+- Only include MEANINGFUL relationships — not every memory is related
+- Two memories from different sources about the same topic → "supports" (corroboration)
+- A newer fact that changes an older one → "supersedes"
+- A hypothesis and its evidence → "supports" with lower confidence
+- Self-knowledge and feedback → "derived_from"
 
 Return ONLY a JSON array (no other text):
 [{"from_id": "memory:xxx", "to_id": "memory:yyy", "type": "supports", "reason": "..."}]
