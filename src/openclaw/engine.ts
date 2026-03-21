@@ -642,11 +642,51 @@ export function createEngine(
         }
       }
 
+      // --- Contradiction detection ---
+      // Check if any recalled memories have "contradicts" edges in the graph.
+      // This lets the agent see ⚠︎ markers on disputed facts.
+      let enriched: RecalledMemory[] = memories;
+      try {
+        const recalledIds = memories.map(m => String(m.id));
+        const contradictedIds = new Set<string>();
+        if (recalledIds.length > 0) {
+          const contradictions = await query<{ in: string; out: string }>(
+            `SELECT in, out FROM relates WHERE type = "contradicts"
+             AND (in IN $ids OR out IN $ids)`,
+            { ids: recalledIds },
+          );
+          for (const c of contradictions ?? []) {
+            contradictedIds.add(String(c.in));
+            contradictedIds.add(String(c.out));
+          }
+        }
+        // Enrich with contradiction flag
+        enriched = memories.map(m => ({
+          ...m,
+          is_contradicted: contradictedIds.has(String(m.id)),
+        }));
+      } catch (contradictErr) {
+        logger.debug(`Contradiction detection failed (non-fatal): ${contradictErr}`);
+      }
+
+      // --- Biological memory: boost salience for recalled memories ---
+      // Every time a memory is recalled, its salience gets a small bump
+      // and recall_count increments — just like biological reinforcement.
+      const finalIds = [...new Set(enriched.map(m => String(m.id)))];
+      if (finalIds.length > 0) {
+        query(
+          `UPDATE memory SET recall_count += 1, last_recalled = time::now(),
+             salience = math::min(salience + 0.05, 1.0)
+           WHERE id IN $ids`,
+          { ids: finalIds },
+        ).catch(() => {}); // Fire-and-forget — non-blocking
+      }
+
       // Token budget split (must sum to 100%):
       //   52% memories, 5% tool ledger, 3% scratchpad, 40% graph map
       const isFirstAssemble = !hasShownToolsGuide;
       const memBudget = Math.floor(memoryBudget * 0.52);
-      const fitted = fitToTokenBudget(memories, memBudget);
+      const fitted = fitToTokenBudget(enriched, memBudget);
 
       // Build injection — session header + FOUR parts:
       const parts: string[] = [];
@@ -816,6 +856,19 @@ export function createEngine(
         if (graphMapCache) parts.push(graphMapCache);
       } catch (graphError) {
         logger.debug(`Graph map failed (non-fatal): ${graphError}`);
+      }
+
+      // --- Discovery mode nudge ---
+      // In the first 72 hours, remind the agent to learn aggressively
+      if (isDiscoveryMode) {
+        parts.push(
+          "",
+          "### Discovery Mode Active",
+          "You are in discovery mode (first 72 hours). Learn aggressively:",
+          "- Save every person, project, preference you encounter",
+          "- When corrected, save BOTH the correction AND what you learned about yourself",
+          "- Prefer higher salience (0.6+) for identity facts",
+        );
       }
 
       if (isFirstAssemble) hasShownToolsGuide = true;
