@@ -123,6 +123,18 @@ export async function createPerson(
       // Create new contact entity
       contactId = `entity:${generateId("c")}`;
       const contactName = contact.label || `${name} (${contact.source})`;
+      // SurrealDB 3.0: option<string> rejects NULL — only include external_url if provided
+      const contactParams: Record<string, unknown> = {
+        id: contactId,
+        contactName,
+        source: contact.source,
+        extId: contact.id,
+      };
+      const optContactFields: string[] = [];
+      if (contact.url) {
+        contactParams.url = contact.url;
+        optContactFields.push("external_url: $url,");
+      }
       await query(
         `CREATE type::record($id) CONTENT {
           name: $contactName,
@@ -130,18 +142,12 @@ export async function createPerson(
           aliases: [],
           external_source: $source,
           external_id: $extId,
-          external_url: $url,
+          ${optContactFields.join("\n          ")}
           external_channel: $extId,
           created_at: time::now(),
           updated_at: time::now()
         };`,
-        {
-          id: contactId,
-          contactName,
-          source: contact.source,
-          extId: contact.id,
-          url: contact.url || null,
-        },
+        contactParams,
       );
       logger.info(`Created contact: ${contactId} (${contact.source}:${contact.id})`);
     }

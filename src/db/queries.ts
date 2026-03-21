@@ -86,13 +86,13 @@ export function searchMemoriesVector(
   };
 }
 
-/** Find memories with zero outgoing 'relates' edges (for linker) */
+/** Find memories not yet processed by linker (uses indexed boolean) */
 export function findUnlinkedMemories(limit: number): PreparedQuery {
   return {
     surql: `
       SELECT * FROM memory
       WHERE is_active = true
-        AND count(->relates) = 0
+        AND linked = false
       ORDER BY created_at DESC
       LIMIT $limit;
     `,

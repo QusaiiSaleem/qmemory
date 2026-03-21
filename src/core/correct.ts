@@ -99,7 +99,8 @@ export async function correctMemory(
       updateParams.scope = params.scope;
     }
     if (params.valid_until !== undefined) {
-      updates.push("valid_until = $validUntil");
+      // SurrealDB 3.0: option<datetime> needs explicit type conversion from string
+      updates.push("valid_until = type::datetime($validUntil)");
       updateParams.validUntil = params.valid_until;
     }
     if (params.new_content !== undefined) {

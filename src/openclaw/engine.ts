@@ -505,14 +505,15 @@ export function createEngine(
         return { ingested: false };
       }
 
-      const messageId = `message:${generateId("m")}`;
+      const msgIdPart = generateId("m");
+      const messageId = `message:${msgIdPart}`;
       const tokenCount = estimateTokens(params.content);
 
       // Create message node
       // SurrealDB 3.0: option<> fields reject NULL — omit them entirely when absent
       const optionalMsgFields: string[] = [];
       const msgParams: Record<string, unknown> = {
-        id: messageId,
+        idPart: msgIdPart,
         sessionId: sessionIdPart(currentSessionId!),
         role: params.role,
         content: params.content,
@@ -528,7 +529,7 @@ export function createEngine(
       }
 
       await query(
-        `CREATE $id CONTENT {
+        `CREATE type::record("message", $idPart) CONTENT {
           session: type::record("session", $sessionId),
           role: $role,
           content: $content,
@@ -992,9 +993,10 @@ export function createEngine(
             const text = extractText((m as any)?.content);
             if (!text || text.length < 5) continue;
             const role = (m as any)?.role ?? "unknown";
-            const msgId = `message:${generateId("m")}`;
+            const msgIdPart = generateId("m");
+            const msgId = `message:${msgIdPart}`;
             await query(
-              `CREATE $id CONTENT {
+              `CREATE type::record("message", $idPart) CONTENT {
                 session: type::record("session", $sid),
                 role: $role,
                 content: $content,
@@ -1002,7 +1004,7 @@ export function createEngine(
                 created_at: time::now()
               }`,
               {
-                id: msgId,
+                idPart: msgIdPart,
                 sid,
                 role,
                 content: text.slice(0, 2000), // Cap to avoid huge records

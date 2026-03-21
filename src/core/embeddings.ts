@@ -138,9 +138,16 @@ export async function generateEmbedding(
  * Safe to call multiple times — SurrealDB handles idempotency.
  */
 export async function enableVectorIndex(dimension: number): Promise<void> {
-  logger.info(`Enabling HNSW vector index (dimension: ${dimension})...`);
+  // DDL statements (DEFINE INDEX) don't support $params for DIMENSION — must interpolate.
+  // Validate the dimension is a safe integer to prevent injection.
+  const safeDim = Math.floor(Number(dimension));
+  if (!Number.isFinite(safeDim) || safeDim < 1 || safeDim > 10000) {
+    logger.error(`Invalid embedding dimension: ${dimension}`);
+    return;
+  }
+  logger.info(`Enabling HNSW vector index (dimension: ${safeDim})...`);
   const result = await query(
-    `DEFINE INDEX idx_memory_embedding ON memory FIELDS embedding HNSW DIMENSION ${dimension} TYPE F32 DIST COSINE;`,
+    `DEFINE INDEX idx_memory_embedding ON memory FIELDS embedding HNSW DIMENSION ${safeDim} TYPE F32 DIST COSINE;`,
   );
   if (result !== null) {
     logger.info("Vector index enabled on memory.embedding");

@@ -418,9 +418,10 @@ async function discoverRelationships(
   if (memoryIds.length < 2) return 0;
 
   // Fetch the memories we just created
-  const idList = memoryIds.map(id => `type::record("${id}")`).join(", ");
+  // Use parameterized query — never interpolate IDs into SurrealQL
   const memories = await query<{ id: string; content: string }>(
-    `SELECT id, content FROM memory WHERE id IN [${idList}] AND is_active = true;`,
+    `SELECT id, content FROM memory WHERE id IN $ids AND is_active = true;`,
+    { ids: memoryIds },
   );
 
   if (!memories || memories.length < 2) return 0;
