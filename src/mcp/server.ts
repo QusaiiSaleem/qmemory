@@ -113,6 +113,7 @@ server.addTool({
         "idea",
         "feedback",
         "domain",
+        "self",
       ])
       .describe("Memory category"),
     salience: z
@@ -125,6 +126,26 @@ server.addTool({
       .string()
       .optional()
       .describe("Scope: global, project:xxx, topic:xxx (default global)"),
+    source_person: z
+      .string()
+      .optional()
+      .describe("Who said/reported this? Person name"),
+    evidence_type: z
+      .enum(["observed", "reported", "inferred", "self"])
+      .optional()
+      .describe("How was this learned?"),
+    confidence: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("How certain? 0.0-1.0. Use < 0.5 for hypotheses"),
+    context_mood: z
+      .string()
+      .optional()
+      .describe(
+        "Situational context: calm_decision, heated_discussion, brainstorm, correction, casual, urgent",
+      ),
   }),
   annotations: {
     readOnlyHint: false,
@@ -140,6 +161,10 @@ server.addTool({
         category: args.category,
         salience: args.salience,
         scope: args.scope,
+        source_person: args.source_person,
+        evidence_type: args.evidence_type,
+        confidence: args.confidence,
+        context_mood: args.context_mood,
       });
 
       if (result.action === "NOOP") {
