@@ -30,13 +30,16 @@ Qmemory is NOT just a memory system — it's the agent's **situational awareness
 
 ## What the agent sees (context injection order)
 
-1. **Session header** — channel, topic, scope, model name, memory count
-2. **Background activity** — recent cron/heartbeat outcomes + active sessions list
-3. **Tool call ledger** — recent tool calls (survives compaction)
-4. **Cross-session memories** — grouped by category, with [IDs] + [scope] + (age)
-5. **Working memory** — scratchpad (task progress, findings, questions)
-6. **Knowledge graph** — channels → topics → entities + relationships map
-7. **Tools guide** — memory tools reference (first message only)
+1. **Agent Self-Model** — self category memories injected FIRST (what the agent knows about itself)
+2. **Session header** — channel, topic, scope, model name, memory count
+3. **Background activity** — recent cron/heartbeat outcomes + active sessions list
+4. **Tool call ledger** — recent tool calls (survives compaction)
+5. **Cross-session memories** — grouped by category, with [IDs] + [scope] + (age) + evidence markers (source, confidence, contradictions)
+6. **Hypotheses** — low-confidence memories (confidence < 0.5) listed separately
+7. **Working memory** — scratchpad (task progress, findings, questions)
+8. **Knowledge graph** — channels → topics → entities + relationships map
+9. **Discovery Mode nudge** — aggressive extraction reminder (first 72h only)
+10. **Tools guide** — memory tools reference (first message only)
 
 ## Auto-created graph structure
 
@@ -109,6 +112,8 @@ examples, clear motivation). Teaches the agent:
 - **Survives compaction** — tool ledger, scratchpad, and memories persist when messages are dropped
 - **SurrealDB record references** — always use `type::record("table", $id)` for FK fields, never plain strings (JS SDK returns RecordId objects, not strings)
 - **Prompting best practices** — follow Anthropic's guidelines: clear/direct, XML structure, examples, context for motivation
+- **Memory as evidence, not truth** — every memory has a source_person, confidence, and evidence_type. Contradictions are flagged, not auto-resolved.
+- **Agent self-model** — the agent learns about itself via the "self" category. Self-knowledge is injected first in context.
 
 ## Quick Start
 
@@ -218,8 +223,8 @@ Auth: `plugin` mode (no token needed on localhost).
 All background tasks use **self-scheduling**: after each run, the task checks if it found work. Found work → run again sooner (burst mode). No work → back off (idle mode). Reflect is staggered by half-interval so they never compete for the subagent runner.
 
 - **Linker** (5 min active / 30 min idle): finds unlinked memories, asks subagent for relationships, creates `relates` edges
-- **Salience Decay** (piggybacks on Linker): memories older than 7 days get salience *= 0.95 (floor 0.1). Pure DB, no LLM cost
-- **Reflect** (10 min active / 30 min idle, staggered): synthesizes insights across memories, resolves contradictions
+- **Salience Decay** (piggybacks on Linker): 3-tier biological model — never-recalled memories decay ×0.90, stale-recalled ×0.98, cemented (5+ recalls) never drop below 0.5. Pure DB, no LLM cost
+- **Reflect** (10 min active / 30 min idle, staggered): 5 jobs — patterns, contradictions (flagged, no auto-delete), compressions (merge old facts → principles), ghost entity detection, self-learnings
 
 ## Memory Fields
 
@@ -229,6 +234,26 @@ All background tasks use **self-scheduling**: after each run, the task checks if
 | `valid_from/until` | Temporal validity — expired facts filtered out |
 | `scope` | Visibility: `global`, `project:xxx`, `topic:xxx` |
 | `confidence` | LLM confidence in the fact |
+| `source_person` | record<entity> FK — who said this fact |
+| `evidence_type` | How learned: observed, reported, inferred, self |
+| `recall_count` | Biological memory counter — incremented on recall |
+| `last_recalled` | When this memory was last recalled |
+| `context_mood` | Situational context: calm_decision, heated_discussion, brainstorm, correction, casual, urgent |
+
+## Memory Categories
+
+8 categories used for grouping and injection:
+
+| Category | Purpose |
+|----------|---------|
+| `self` | Agent's self-knowledge (soul): communication patterns, what works, what to avoid — injected FIRST |
+| `identity` | Facts about people: names, roles, relationships |
+| `preference` | User preferences, likes/dislikes, working style |
+| `project` | Project-scoped facts, decisions, progress |
+| `fact` | General world facts, domain knowledge |
+| `context` | Situational or temporal context |
+| `decision` | Decisions made, rationale, outcomes |
+| `task` | Task tracking, follow-ups, commitments |
 
 ## Entity External References
 
@@ -236,6 +261,19 @@ Entities can reference external systems (email, tasks, Smartsheet):
 - `external_source`: "hey", "apple-reminders", "smartsheet", "railway"
 - `external_id`: reference ID in the source system
 - `external_url`: direct URL to the resource
+
+## Discovery Mode
+
+The first 72 hours of a session context activates **Discovery Mode** — an aggressive extraction phase:
+
+- Extract more entities, preferences, and identity facts than normal
+- Prioritise `self` and `identity` category memories
+- Lower confidence threshold for saving new facts (explore broadly)
+- Flag stored as engine state (`discoveryMode: true`), passed to the extract prompt
+- After 72h: one-time **identity summary** generated (user profile + agent soul document saved as `self` memories)
+- After the summary is saved, Discovery Mode is permanently disabled for that context
+
+Purpose: build a rich model of the user and the agent's own communication patterns early, while interactions are fresh and varied.
 
 ## Gotchas
 
