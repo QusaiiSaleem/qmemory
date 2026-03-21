@@ -44,11 +44,13 @@ export function setExtractLogger(l: QmemoryLogger): void {
  *
  * @param messages        - The conversation messages to extract from
  * @param subagentRunner  - LLM function to perform extraction (optional)
+ * @param options         - Optional settings (discoveryMode for new relationships)
  * @returns Array of extracted facts, or empty if no LLM available
  */
 export async function extractMemories(
   messages: Message[],
   subagentRunner?: SubagentRunner,
+  options?: { discoveryMode?: boolean },
 ): Promise<ExtractedFact[]> {
   // No LLM available — graceful degradation
   if (!subagentRunner) {
@@ -69,6 +71,8 @@ export async function extractMemories(
     // Skip messages that ARE extraction prompts or their JSON responses
     if (content.includes("You are a memory extraction engine")) return false;
     if (content.includes("memory extraction engine")) return false;
+    if (content.includes("You are the memory system for an AI agent")) return false;
+    if (content.includes("memory system for an AI agent")) return false;
     // Skip pure JSON array responses (extraction output)
     const trimmed = content.trim();
     if (trimmed.startsWith("[{") && trimmed.endsWith("}]") && trimmed.includes('"category"')) return false;
@@ -85,28 +89,71 @@ export async function extractMemories(
     .map((m) => `[${m.role}]: ${m.content}`)
     .join("\n");
 
-  const categoryList = MEMORY_CATEGORIES.join(", ");
+  // --- Build discovery mode section (extra-aggressive extraction for new relationships) ---
+  const discoveryModeSection = options?.discoveryMode
+    ? `DISCOVERY MODE — This is a new relationship. Extract AGGRESSIVELY:
+- User's name, role, responsibilities, organization
+- Projects they work on, tools they use daily
+- Communication style (formal/casual, which language for what)
+- People they mention and those people's roles/relationships
+- Preferences about how the agent should behave
+- Any corrections or feedback → save as category "self"
+- Patterns in how they ask questions or give instructions
 
-  const prompt = `You are a memory extraction engine. Read the conversation below and extract key facts worth remembering across future sessions.
+Use HIGHER salience than normal: 0.6+ for identity facts, 0.8+ for preferences.
+Every piece of identity information matters in a new relationship.`
+    : "";
+
+  const prompt = `You are the memory system for an AI agent. You extract knowledge from conversations
+that will persist across sessions — this is how the agent builds its brain over time.
+
+You extract THREE types of knowledge:
+1. WORLD KNOWLEDGE — facts, decisions, events, project info
+2. USER KNOWLEDGE — who the user is, preferences, communication style
+3. SELF KNOWLEDGE — what the agent should learn about its own behavior
 
 Rules:
 - Each fact must be a single, clear, self-contained statement
-- Only extract information that would be useful in future conversations
+- Only extract information useful in future conversations
 - Skip greetings, pleasantries, and trivial exchanges
-- Category must be one of: ${categoryList}
-- Salience: 0.0 (trivial) to 1.0 (critical). Most facts are 0.4-0.7
-- Scope: "global" unless the fact is clearly about a specific project or topic
-- Entities: list any people, projects, organizations, or systems mentioned
+- ALWAYS note WHO said something (source_person) when identifiable
+- ALWAYS assess confidence: was this stated definitively or tentatively?
+- When the user corrects the agent or expresses how they want to be communicated with,
+  extract this as category "self" — the agent is learning about itself
+
+Categories: ${MEMORY_CATEGORIES.join(", ")}
+Evidence types:
+- "observed" — agent directly saw this happen (tool output, action result)
+- "reported" — someone stated this (may or may not be verified)
+- "inferred" — agent concluded this from multiple signals
+- "self" — agent learning about its own behavior or effectiveness
+
+Context moods (when identifiable):
+- "calm_decision" — deliberate choice in normal discussion
+- "heated_discussion" — said during disagreement or frustration
+- "brainstorm" — exploratory, not committed
+- "correction" — user fixing a mistake
+- "casual" — passing mention, not emphasized
+- "urgent" — time-pressured decision
+
+SELF-LEARNING — watch for these signals:
+- User says "don't do X" or "stop doing X" → self memory about what to avoid
+- User says "yes exactly" or "perfect" → self memory about what works
+- User switches language mid-conversation → self memory about language preference
+- User ignores a long response but engages with a short one → self memory about length
+- User corrects a fact → feedback memory about the correction + self memory about being careful with that topic
 
 EXTERNAL REFERENCES — watch for mentions of:
-- Emails (HEY, Gmail): extract entity with type "email", include subject/sender
-- Tasks (Apple Reminders): extract entity with type "task", include list name
-- Calendar events: extract entity with type "event", include date/time
-- Smartsheet rows: extract entity with type "smartsheet", include sheet name
-- Railway deployments: extract entity with type "deployment", include service name
-- URLs or documents: extract entity with type "document"
+- Emails (HEY, Gmail): entity type "email", include subject/sender
+- Tasks (Apple Reminders): entity type "task", include list name
+- Calendar events: entity type "event", include date/time
+- Smartsheet rows: entity type "smartsheet", include sheet name
+- Railway deployments: entity type "deployment", include service name
+- URLs or documents: entity type "document"
 
-For external references, include "external_source" (e.g. "hey", "apple-reminders", "smartsheet", "railway", "calendar") in the entity entry.
+For external references, include "external_source" in the entity entry.
+
+${discoveryModeSection}
 
 CONVERSATION:
 ${conversationText}
@@ -114,14 +161,27 @@ ${conversationText}
 Respond with ONLY a JSON array (no markdown, no explanation):
 [
   {
-    "content": "The single fact statement",
-    "category": "context",
-    "salience": 0.6,
-    "scope": "global",
+    "content": "Budget approved at 500K SAR for MAZJ project",
+    "category": "decision",
+    "salience": 0.8,
+    "scope": "project:mazj",
+    "confidence": 0.9,
+    "source_person": "Qusai",
+    "evidence_type": "reported",
+    "context_mood": "calm_decision",
     "entities": [
-      {"name": "entity_name", "type": "person"},
-      {"name": "Budget approval email", "type": "email", "external_source": "hey"}
+      {"name": "Qusai", "type": "person"},
+      {"name": "MAZJ", "type": "project"}
     ]
+  },
+  {
+    "content": "User prefers concise responses — said 'don't over-explain'",
+    "category": "self",
+    "salience": 0.8,
+    "scope": "global",
+    "confidence": 0.95,
+    "evidence_type": "self",
+    "context_mood": "correction"
   }
 ]
 
@@ -197,8 +257,15 @@ function parseExtractedFacts(response: string): ExtractedFact[] {
       category,
       salience,
       scope: typeof item.scope === "string" ? item.scope : "global",
+      confidence: typeof item.confidence === "number" ? Math.max(0, Math.min(1, item.confidence)) : undefined,
+      source_person: typeof item.source_person === "string" ? item.source_person : undefined,
+      evidence_type: typeof item.evidence_type === "string" ? item.evidence_type : undefined,
+      context_mood: typeof item.context_mood === "string" ? item.context_mood : undefined,
       entities: Array.isArray(item.entities)
-        ? item.entities.map(String)
+        ? item.entities.map((e) =>
+            typeof e === "string" ? e
+            : typeof e === "object" && e !== null && "name" in e ? e as import("../config.js").ExtractedEntityRef
+            : String(e))
         : undefined,
     });
   }
@@ -209,7 +276,7 @@ function parseExtractedFacts(response: string): ExtractedFact[] {
 /** Type guard: does this object have the minimum fields for a fact? */
 function isFactLike(
   item: unknown,
-): item is { content: string; category: string; salience: number; scope?: string; entities?: unknown[] } {
+): item is { content: string; category: string; salience: number; scope?: string; confidence?: number; source_person?: string; evidence_type?: string; context_mood?: string; entities?: unknown[] } {
   return (
     typeof item === "object" &&
     item !== null &&

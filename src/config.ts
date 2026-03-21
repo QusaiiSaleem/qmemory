@@ -284,6 +284,10 @@ export interface ExtractedFact {
   category: MemoryCategory;
   salience: number;
   scope: string;
+  confidence?: number;             // LLM confidence in the fact (0.0 - 1.0)
+  source_person?: string;          // Person name (resolved to entity later)
+  evidence_type?: string;          // "observed" | "reported" | "inferred" | "self"
+  context_mood?: string;           // "calm_decision" | "heated_discussion" | "brainstorm" | "correction" | "casual" | "urgent"
   entities?: Array<string | ExtractedEntityRef>;  // Simple name or rich reference
 }
 
