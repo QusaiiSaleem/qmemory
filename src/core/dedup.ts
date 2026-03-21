@@ -45,15 +45,24 @@ export function setDedupLogger(l: QmemoryLogger): void {
  * Decide whether a new fact should be ADDed, UPDATEd over an existing
  * memory, or skipped entirely (NOOP).
  *
- * @param newFact       - The new fact content string
+ * @param newFact          - The new fact content string
  * @param existingMemories - Candidate matches from BM25 search
  * @param subagentRunner   - Optional LLM function for smart dedup
+ * @param context          - Optional metadata about the new fact (category,
+ *                           confidence, source_person, evidence_type) used to
+ *                           make smarter decisions (e.g. hypothesis vs confirmed fact)
  * @returns A DedupDecision with action, optional target_id, and confidence
  */
 export async function dedup(
   newFact: string,
   existingMemories: Memory[],
   subagentRunner?: SubagentRunner,
+  context?: {
+    category?: string;
+    confidence?: number;
+    source_person?: string;
+    evidence_type?: string;
+  },
 ): Promise<DedupDecision> {
   // No existing memories → definitely ADD
   if (existingMemories.length === 0) {
@@ -64,7 +73,8 @@ export async function dedup(
   // Try LLM-driven dedup first (most accurate)
   if (subagentRunner) {
     try {
-      return await llmDedup(newFact, existingMemories, subagentRunner);
+      // Pass context so the LLM can apply evidence-aware rules
+      return await llmDedup(newFact, existingMemories, subagentRunner, context);
     } catch (error) {
       logger.warn(`LLM dedup failed, falling back to rules: ${error}`);
       // Fall through to rule-based
@@ -83,6 +93,7 @@ async function llmDedup(
   newFact: string,
   existingMemories: Memory[],
   subagentRunner: SubagentRunner,
+  context?: { category?: string; confidence?: number; source_person?: string; evidence_type?: string },
 ): Promise<DedupDecision> {
   // Build the prompt with the new fact + existing candidates
   const existingList = existingMemories
@@ -95,8 +106,16 @@ async function llmDedup(
 - UPDATE: The new fact supersedes or corrects an existing memory (provide the target_id to replace).
 - NOOP: The new fact is already fully captured by an existing memory.
 
+IMPORTANT RULES:
+- A hypothesis (confidence < 0.5) should NEVER auto-replace a confirmed fact
+- Two memories from DIFFERENT sources are not duplicates even if similar —
+  they are corroborating evidence (use "supports" relationship)
+- A "self" category memory about agent behavior is NEVER a duplicate of a
+  "context" memory about the world, even if they overlap
+- If the new fact UPDATES an existing fact, preserve the source_person chain
+
 NEW FACT:
-"${newFact}"
+"${newFact}" [category: ${context?.category ?? "unknown"}, confidence: ${context?.confidence ?? "0.8"}, source: ${context?.source_person ?? "unknown"}]
 
 EXISTING MEMORIES:
 ${existingList}
