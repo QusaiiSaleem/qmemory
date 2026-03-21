@@ -488,9 +488,9 @@ export function createSubagentSpawnedHandler(
       const sid = sessionIdPart(sharedState.currentSessionId);
       await query(
         `LET $parent = type::record("session", $parentId);
-         LET $child = (SELECT id FROM session WHERE session_key = $childKey LIMIT 1);
-         IF $child[0] != NONE THEN
-           RELATE $parent->relates->$child[0].id CONTENT {
+         LET $child = (SELECT VALUE id FROM session WHERE session_key = $childKey LIMIT 1)[0];
+         IF $child != NONE THEN
+           RELATE $parent->relates->$child CONTENT {
              type: "spawned",
              reason: $label,
              confidence: 1.0,

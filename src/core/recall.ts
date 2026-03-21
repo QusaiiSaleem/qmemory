@@ -146,7 +146,7 @@ async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
   const surql = `
     LET $entities = (
       SELECT id FROM entity
-      WHERE ${words.map((_, i) => `name ~ $w${i}`).join(" OR ")}
+      WHERE ${words.map((_, i) => `name CONTAINS $w${i}`).join(" OR ")}
       LIMIT 10
     );
     SELECT * FROM memory

@@ -338,8 +338,8 @@ export function createEngine(
         currentSessionId = String(existing[0].id); // RecordId → string
         if (sharedState) sharedState.currentSessionId = currentSessionId;
         await query(
-          "UPDATE $id SET last_active = time::now()",
-          { id: currentSessionId },
+          'UPDATE type::record("session", $idPart) SET last_active = time::now()',
+          { idPart: sessionIdPart(currentSessionId) },
         );
         logger.debug(`Loaded existing session: ${currentSessionId}`);
       } else {
@@ -413,9 +413,9 @@ export function createEngine(
             if (!existing || existing.length === 0) {
               await query(
                 `LET $s = type::record("session", $sid);
-                 LET $c = (SELECT id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1);
-                 IF $c[0] != NONE THEN
-                   RELATE $s->relates->$c[0].id CONTENT {
+                 LET $c = (SELECT VALUE id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1)[0];
+                 IF $c != NONE THEN
+                   RELATE $s->relates->$c CONTENT {
                      type: "belongs_to_channel",
                      confidence: 1.0,
                      created_by: "system",
@@ -452,9 +452,9 @@ export function createEngine(
             if (!existing || existing.length === 0) {
               await query(
                 `LET $s = type::record("session", $sid);
-                 LET $t = (SELECT id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1);
-                 IF $t[0] != NONE THEN
-                   RELATE $s->relates->$t[0].id CONTENT {
+                 LET $t = (SELECT VALUE id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1)[0];
+                 IF $t != NONE THEN
+                   RELATE $s->relates->$t CONTENT {
                      type: "belongs_to_topic",
                      confidence: 1.0,
                      created_by: "system",
@@ -467,11 +467,11 @@ export function createEngine(
 
             // Link topic → channel (if not already linked)
             await query(
-              `LET $t = (SELECT id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1);
-               LET $c = (SELECT id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1);
-               IF $t[0] != NONE AND $c[0] != NONE THEN
-                 IF (SELECT id FROM relates WHERE in = $t[0].id AND out = $c[0].id AND type = "part_of_channel" LIMIT 1) = [] THEN
-                   RELATE $t[0].id->relates->$c[0].id CONTENT {
+              `LET $t = (SELECT VALUE id FROM entity WHERE name = $topicName AND type = "topic" LIMIT 1)[0];
+               LET $c = (SELECT VALUE id FROM entity WHERE name = $channel AND type = "channel" LIMIT 1)[0];
+               IF $t != NONE AND $c != NONE THEN
+                 IF (SELECT id FROM relates WHERE in = $t AND out = $c AND type = "part_of_channel" LIMIT 1) = [] THEN
+                   RELATE $t->relates->$c CONTENT {
                      type: "part_of_channel",
                      confidence: 1.0,
                      created_by: "system",
@@ -505,12 +505,13 @@ export function createEngine(
         return { ingested: false };
       }
 
-      const messageId = `message:${generateId("m")}`;
+      const msgIdPart = generateId("m");
+      const messageId = `message:${msgIdPart}`;
       const tokenCount = estimateTokens(params.content);
 
       // Create message node
       await query(
-        `CREATE $id CONTENT {
+        `CREATE type::record("message", $idPart) CONTENT {
           session: type::record("session", $sessionId),
           role: $role,
           content: $content,
@@ -520,7 +521,7 @@ export function createEngine(
           created_at: time::now()
         }`,
         {
-          id: messageId,
+          idPart: msgIdPart,
           sessionId: sessionIdPart(currentSessionId!),
           role: params.role,
           content: params.content,
@@ -646,7 +647,7 @@ export function createEngine(
           `SELECT content, source_type, created_at FROM memory
            WHERE is_active = true
              AND source_type IN ["cron", "agent"]
-             AND content ~ "[cron"
+             AND string::contains(content, "[cron")
            ORDER BY created_at DESC
            LIMIT 5`,
         );
@@ -983,9 +984,10 @@ export function createEngine(
             const text = extractText((m as any)?.content);
             if (!text || text.length < 5) continue;
             const role = (m as any)?.role ?? "unknown";
-            const msgId = `message:${generateId("m")}`;
+            const msgIdPart = generateId("m");
+            const msgId = `message:${msgIdPart}`;
             await query(
-              `CREATE $id CONTENT {
+              `CREATE type::record("message", $idPart) CONTENT {
                 session: type::record("session", $sid),
                 role: $role,
                 content: $content,
@@ -993,7 +995,7 @@ export function createEngine(
                 created_at: time::now()
               }`,
               {
-                id: msgId,
+                idPart: msgIdPart,
                 sid,
                 role,
                 content: text.slice(0, 2000), // Cap to avoid huge records
