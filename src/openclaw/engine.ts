@@ -208,6 +208,7 @@ export function createEngine(
   let currentSessionId: string | null = null;
   let currentSessionKey: string | null = null;
   let hasShownToolsGuide = false; // Show tools list only on first assemble per session
+  let isDiscoveryMode = false; // True if < 72h since first memory — triggers aggressive extraction
 
   // Graph map cache (per engine instance)
   let graphMapCache: string | null = null;
@@ -288,6 +289,17 @@ export function createEngine(
           } catch (importError) {
             logger.warn(`Auto-import failed (non-fatal): ${importError}`);
           }
+        }
+        // Check if in discovery mode (< 72h since first memory)
+        const firstMemoryResult = await query<{ created_at: string }>(
+          "SELECT created_at FROM memory ORDER BY created_at ASC LIMIT 1",
+        );
+        const firstMemoryDate = firstMemoryResult?.[0]?.created_at;
+        isDiscoveryMode = !firstMemoryDate ||
+          (Date.now() - new Date(firstMemoryDate).getTime()) < 72 * 60 * 60 * 1000;
+
+        if (isDiscoveryMode) {
+          logger.info("Discovery Mode active — aggressive extraction enabled");
         }
       } catch (error) {
         logger.error(`Failed to load/apply schema: ${error}`);
@@ -884,7 +896,9 @@ export function createEngine(
 
       let extractedFacts: ExtractedFact[] = [];
       try {
-        extractedFacts = await extractMemories(oldMsgArray, subagentRunner);
+        extractedFacts = await extractMemories(oldMsgArray, subagentRunner, {
+          discoveryMode: isDiscoveryMode,
+        });
       } catch (error) {
         logger.error(`Memory extraction failed: ${error}`);
         return { ok: false, compacted: false };
@@ -901,6 +915,10 @@ export function createEngine(
               salience: fact.salience,
               scope: fact.scope,
               source_type: "conversation",
+              source_person: fact.source_person,
+              evidence_type: fact.evidence_type,
+              confidence: fact.confidence,
+              context_mood: fact.context_mood,
             },
             subagentRunner,
             embeddingConfig,
@@ -1040,11 +1058,15 @@ export function createEngine(
               content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
-              const facts = await extractMemories(msgArray, subagentRunner);
+              const facts = await extractMemories(msgArray, subagentRunner, {
+                discoveryMode: isDiscoveryMode,
+              });
               for (const fact of facts) {
                 await saveMemory(
                   { content: fact.content, category: fact.category,
-                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation",
+                    source_person: fact.source_person, evidence_type: fact.evidence_type,
+                    confidence: fact.confidence, context_mood: fact.context_mood },
                   subagentRunner,
                   embeddingConfig,
                 );
@@ -1105,11 +1127,15 @@ export function createEngine(
               content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
-              const facts = await extractMemories(msgArray, subagentRunner);
+              const facts = await extractMemories(msgArray, subagentRunner, {
+                discoveryMode: isDiscoveryMode,
+              });
               for (const fact of facts) {
                 await saveMemory(
                   { content: fact.content, category: fact.category,
-                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation",
+                    source_person: fact.source_person, evidence_type: fact.evidence_type,
+                    confidence: fact.confidence, context_mood: fact.context_mood },
                   subagentRunner,
                   embeddingConfig,
                 );
@@ -1140,11 +1166,15 @@ export function createEngine(
               content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
-              const facts = await extractMemories(msgArray, subagentRunner);
+              const facts = await extractMemories(msgArray, subagentRunner, {
+                discoveryMode: isDiscoveryMode,
+              });
               for (const fact of facts) {
                 await saveMemory(
                   { content: fact.content, category: fact.category,
-                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation",
+                    source_person: fact.source_person, evidence_type: fact.evidence_type,
+                    confidence: fact.confidence, context_mood: fact.context_mood },
                   subagentRunner,
                   embeddingConfig,
                 );
@@ -1169,11 +1199,15 @@ export function createEngine(
               content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
             })) as import("../config.js").Message[];
             try {
-              const facts = await extractMemories(msgArray, subagentRunner);
+              const facts = await extractMemories(msgArray, subagentRunner, {
+                discoveryMode: isDiscoveryMode,
+              });
               for (const fact of facts) {
                 await saveMemory(
                   { content: fact.content, category: fact.category,
-                    salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+                    salience: fact.salience, scope: fact.scope, source_type: "conversation",
+                    source_person: fact.source_person, evidence_type: fact.evidence_type,
+                    confidence: fact.confidence, context_mood: fact.context_mood },
                   subagentRunner,
                   embeddingConfig,
                 );
@@ -1251,11 +1285,15 @@ Respond ONLY with the JSON object, no markdown fencing.`,
       if (totalContent < 100) return;
 
       try {
-        const facts = await extractMemories(recentMsgArray, subagentRunner);
+        const facts = await extractMemories(recentMsgArray, subagentRunner, {
+          discoveryMode: isDiscoveryMode,
+        });
         for (const fact of facts) {
           await saveMemory(
             { content: fact.content, category: fact.category,
-              salience: fact.salience, scope: fact.scope, source_type: "conversation" },
+              salience: fact.salience, scope: fact.scope, source_type: "conversation",
+              source_person: fact.source_person, evidence_type: fact.evidence_type,
+              confidence: fact.confidence, context_mood: fact.context_mood },
             subagentRunner,
             embeddingConfig,
           );
