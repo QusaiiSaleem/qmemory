@@ -22,9 +22,9 @@ Qmemory is NOT just a memory system — it's the agent's **situational awareness
 │  scratchpad → linked to session (working memory)                │
 │  metrics → linked to session (tracking)                         │
 │                                                                 │
-│  The agent sees: session header + memory table + tool ledger    │
-│  + cron summary + scratchpad + graph map — all injected via     │
-│  systemPromptAddition in assemble()                             │
+│  The agent sees: self-model + session header + memories          │
+│  (with evidence markers) + hypotheses + tool ledger             │
+│  + scratchpad + graph map — injected via assemble()             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,7 +75,7 @@ No agent action needed. The tree builds itself.
 |------|-----------|-----------|--------|
 | `has_message` | session → message | `ingest()` | DONE |
 | `prev_version` | memory → memory | `saveMemory()` UPDATE | DONE |
-| `relates` (any type) | memory ↔ memory/entity | Linker service (5 min) | DONE |
+| `relates` (any type) | memory ↔ memory/entity | Linker service (5 min active / 30 min idle) | DONE |
 | `spawned` | session → session | `subagent_spawned` hook | DONE |
 | `has_identity` | person → contact | `qmemory_person` tool | DONE |
 | `extracted_from` | memory → message | — | NOT POSSIBLE — OpenClaw doesn't pass message IDs to compact/afterTurn |
@@ -87,23 +87,11 @@ No agent action needed. The tree builds itself.
 - **Diagnostic events** (heartbeat health, webhook stats, queue depth): Internal to OpenClaw, not hookable by plugins.
 - **Group participant list**: OpenClaw doesn't expose Telegram group member API to plugins.
 
-## Context injection — what the agent sees
+## Context injection
 
-Injected via `systemPromptAddition` in `assemble()`. Built from Anthropic's prompting best practices:
-- Long data at the top, instructions at the bottom
-- XML-like structure with clear headers
-- Memory IDs visible for direct tool reference
-- Scope + age tags for quick scanning
-- Session header for orientation
-
-The `before_prompt_build` hook adds static instructions via `appendSystemContext`
-(cached by the provider, no per-turn token cost). Defined in `AGENT_SYSTEM_CONTEXT`
-constant in `index.ts`. Follows Anthropic prompting best practices (XML tags,
-examples, clear motivation). Teaches the agent:
-- What the graph contains (tables, relationships)
-- How to use each qmemory tool (with examples)
-- When to save vs search vs link
-- How to read the injected context (IDs, scope tags, age)
+Two injection mechanisms:
+- **`appendSystemContext`** (static, cached) — `AGENT_SYSTEM_CONTEXT` in `index.ts`, teaches the agent its tools, memory philosophy, and how to read injected context. No per-turn cost.
+- **`systemPromptAddition`** (dynamic, per-turn) — built by `assemble()`, contains self-model, memories with evidence markers, tool ledger, scratchpad, graph map. See "What the agent sees" section above for injection order.
 
 ## Design principles
 
@@ -195,7 +183,7 @@ Schema file: `schema/qmemory.surql`
 | Tool | What It Does |
 |------|-------------|
 | `qmemory_search` | 4-tier recall + cross-session tool_call history (use `include_tool_calls: true`) |
-| `qmemory_save` | Save fact with LLM dedup (ADD/UPDATE/NOOP) |
+| `qmemory_save` | Save fact with evidence (source_person, confidence, evidence_type, context_mood) + LLM dedup |
 | `qmemory_correct` | Fix or soft-delete a memory (version chain preserved) |
 | `qmemory_link` | Create dynamic `relates` edge (any relationship type) |
 | `qmemory_import` | Import a .md file into the graph (for migration) |
@@ -242,18 +230,18 @@ All background tasks use **self-scheduling**: after each run, the task checks if
 
 ## Memory Categories
 
-8 categories used for grouping and injection:
+8 categories (must match `MEMORY_CATEGORIES` in `config.ts`):
 
 | Category | Purpose |
 |----------|---------|
 | `self` | Agent's self-knowledge (soul): communication patterns, what works, what to avoid — injected FIRST |
-| `identity` | Facts about people: names, roles, relationships |
-| `preference` | User preferences, likes/dislikes, working style |
-| `project` | Project-scoped facts, decisions, progress |
-| `fact` | General world facts, domain knowledge |
-| `context` | Situational or temporal context |
-| `decision` | Decisions made, rationale, outcomes |
-| `task` | Task tracking, follow-ups, commitments |
+| `style` | Communication preferences (language, tone, format) |
+| `preference` | General user preferences |
+| `context` | Facts about projects, orgs, situations |
+| `decision` | Past decisions made, with rationale |
+| `idea` | Future plans, suggestions, proposals |
+| `feedback` | User corrections and error reports |
+| `domain` | Sector/domain knowledge |
 
 ## Entity External References
 
