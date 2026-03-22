@@ -235,7 +235,7 @@ If no relationships found, return: []`;
         if (hoursSinceFirst >= 72 && hoursSinceFirst < 168) {
           const existing = await query(
             `SELECT id FROM memory WHERE category = "self"
-             AND content ~ "Identity Summary" AND is_active = true LIMIT 1`,
+             AND string::contains(content, "Identity Summary") AND is_active = true LIMIT 1`,
           );
           if (!existing?.length) {
             await runIdentitySummary();

@@ -417,7 +417,7 @@ export default function register(api: any): void {
         if (params.include_messages && params.query) {
           const msgResults = await query<Record<string, unknown>>(
             `SELECT role, content, created_at, session FROM message
-             WHERE content ~ $query
+             WHERE string::contains(content, $query)
              ORDER BY created_at DESC
              LIMIT $limit`,
             { query: params.query, limit: (params.limit as number) ?? 10 },

@@ -677,7 +677,7 @@ export function createEngine(
       if (finalIds.length > 0) {
         query(
           `UPDATE memory SET recall_count += 1, last_recalled = time::now(),
-             salience = math::min(salience + 0.05, 1.0)
+             salience = math::min([salience + 0.05, 1.0])
            WHERE id IN $ids`,
           { ids: finalIds },
         ).catch(() => {}); // Fire-and-forget — non-blocking
@@ -709,7 +709,7 @@ export function createEngine(
           `SELECT content, source_type, created_at FROM memory
            WHERE is_active = true
              AND source_type IN ["cron", "agent"]
-             AND content ~ "[cron"
+             AND string::contains(content, "[cron")
            ORDER BY created_at DESC
            LIMIT 5`,
         );
