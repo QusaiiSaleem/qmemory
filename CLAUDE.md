@@ -292,6 +292,11 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 - `embedding_provider: "auto"` — reads from OpenClaw's existing config
 - `linker_interval_ms: 1800000` — linker idle interval (30 min). When active: 5 min
 - `reflect_interval_ms: 1800000` — reflect idle interval (30 min). When active: 10 min. Staggered 15 min after linker
+- `subagent_model: "zai/glm-5"` — model for background LLM tasks (dedup, extract, link). Use cheap models to save costs. Alternatives: `google-gemini-cli/gemini-3-flash-preview`, `anthropic/claude-sonnet-4-6`
+- `extraction_mode: "balanced"` — adaptive extraction preset:
+  - `economy` — for Lite plans (80 prompts/5hr), minimal token usage, ~1-2 extractions/hour
+  - `balanced` — for Pro plans (400 prompts/5hr), normal operation, ~3-5 extractions/hour (default)
+  - `aggressive` — for Team/Unlimited plans, extract everything, no limits
 
 ## Publishing
 

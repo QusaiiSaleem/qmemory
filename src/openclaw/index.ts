@@ -167,18 +167,19 @@ export type SubagentRunner = (task: string) => Promise<string>;
 
 let subagentCounter = 0;
 
-function createSubagentRunner(api: any): SubagentRunner {
+function createSubagentRunner(api: any, model: string): SubagentRunner {
   return async (task: string): Promise<string> => {
     // Generate a unique session key for this subagent run
     const sessionKey = `qmemory:subagent:${Date.now()}-${++subagentCounter}`;
 
     try {
-      // 1. Start the subagent run
+      // 1. Start the subagent run (use configured model for background tasks)
       const { runId } = await api.runtime.subagent.run({
         sessionKey,
         message: task,
         idempotencyKey: `qmem-${Date.now()}-${subagentCounter}`,
         lane: "subagent",
+        model,  // Use configurable model (default: zai/glm-5)
       });
 
       // 2. Wait for it to complete (15s timeout)
@@ -238,7 +239,7 @@ export default function register(api: any): void {
   };
 
   // 3. Create the subagent runner (for LLM operations: dedup, extract, link)
-  const subagentRunner = createSubagentRunner(api);
+  const subagentRunner = createSubagentRunner(api, config.subagent_model);
 
   // 4. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
   const openclawConfig = api.config as Record<string, unknown> | undefined;

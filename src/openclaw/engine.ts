@@ -53,6 +53,7 @@ import type { EmbeddingConfig } from "../core/embeddings.js";
 import { migrateWorkspaceMemories, setMigrateLogger } from "../core/migrate.js";
 import { getScratchpad, updateScratchpad, clearScratchpad, setScratchpadLogger } from "../core/scratchpad.js";
 import { trackEvent, setMetricsLogger } from "../core/metrics.js";
+import { shouldExtract, getExtractionStats } from "./adaptive-extraction.js";
 import type { SubagentRunner } from "./index.js";
 import type { SharedEngineState } from "./hooks.js";
 import type { ToolCall } from "../config.js";
@@ -1327,15 +1328,38 @@ Respond ONLY with the JSON object, no markdown fencing.`,
         }
       }
 
-      // Background: extract facts from the last few messages
+      // Background: extract facts from the last few messages (ADAPTIVE)
       const recentMsgArray = messages.slice(-4).map((m: any) => ({
         id: "", session: "", role: m.role ?? "user",
         content: extractText(m?.content), token_count: 0, created_at: new Date().toISOString(),
       })) as import("../config.js").Message[];
 
-      // Skip very short messages
-      const totalContent = recentMsgArray.map(m => m.content).join("").length;
-      if (totalContent < 100) return;
+      // Determine channel type from session key
+      const parsedKey = parseSessionKey(currentSessionKey ?? "");
+      const channelType: "dm" | "group" | "cron" | "subagent" =
+        parsedKey.chatType === "direct" ? "dm" :
+        parsedKey.chatType === "group" ? "group" :
+        parsedKey.chatType === "cron" ? "cron" : "subagent";
+
+      // Get content for scoring
+      const content = recentMsgArray.map(m => m.content).join("");
+
+      // Adaptive extraction decision
+      const decision = shouldExtract({
+        content,
+        channelType,
+        sessionId: currentSessionId ?? "unknown",
+        mode: config.extraction_mode,
+        recentMessageCount: messages.length,
+      });
+
+      // Skip if extraction not recommended
+      if (!decision.extract) {
+        logger.debug(
+          `Adaptive extraction: skipped (${decision.reason}) [mode: ${config.extraction_mode}]`
+        );
+        return;
+      }
 
       try {
         const facts = await extractMemories(recentMsgArray, subagentRunner, {
@@ -1353,13 +1377,15 @@ Respond ONLY with the JSON object, no markdown fencing.`,
         }
         if (facts.length > 0) {
           graphMapCache = null; // Invalidate graph cache
-          logger.debug(`afterTurn: extracted ${facts.length} facts`);
+          logger.info(
+            `Adaptive extraction: saved ${facts.length} facts (budget: ${decision.budgetRemaining} remaining, score: ${decision.score})`
+          );
           if (currentSessionId) {
             trackEvent(currentSessionId, "extraction", String(facts.length)).catch(() => {});
           }
         }
       } catch (error) {
-        logger.warn(`afterTurn extraction failed: ${error}`);
+        logger.warn(`Adaptive extraction failed: ${error}`);
       }
     },
 

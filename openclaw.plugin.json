@@ -23,6 +23,13 @@
       "linker_interval_ms": { "type": "integer", "default": 1800000 },
       "reflect_interval_ms": { "type": "integer", "default": 1800000 },
       "min_salience_recall": { "type": "number", "default": 0.3 },
+      "subagent_model": { "type": "string", "default": "zai/glm-5" },
+      "extraction_mode": {
+        "type": "string",
+        "enum": ["economy", "balanced", "aggressive"],
+        "default": "balanced",
+        "description": "Extraction preset: economy (Lite plans, saves tokens), balanced (Pro plans, normal), aggressive (Team/Unlimited, extract everything)"
+      },
       "debug": { "type": "boolean", "default": false }
     }
   },
@@ -41,6 +48,11 @@
     "linker_interval_ms": { "label": "Linker Interval (ms)", "help": "How often the background linker runs" },
     "reflect_interval_ms": { "label": "Reflect Interval (ms)", "help": "How often synthesis runs (expensive)" },
     "min_salience_recall": { "label": "Min Salience for Recall", "help": "Skip memories below this importance" },
+    "subagent_model": { "label": "Subagent Model", "help": "Model for background LLM tasks (dedup, extract, link). Use cheap models like zai/glm-5 or google-gemini-cli/gemini-3-flash-preview" },
+    "extraction_mode": {
+      "label": "Extraction Mode",
+      "help": "economy = save tokens (Lite plans), balanced = normal (Pro plans), aggressive = no limits (Team/Unlimited)"
+    },
     "debug": { "label": "Debug Mode" }
   }
 }

@@ -515,6 +515,8 @@ All options are set via `openclaw config set plugins.config.qmemory.<key> <value
 | `linker_interval_ms` | integer | `300000` | Background linker interval (default: 5 min) |
 | `reflect_interval_ms` | integer | `1800000` | Background reflection interval (default: 30 min) |
 | `min_salience_recall` | number | `0.3` | Minimum salience to include in recall results |
+| `subagent_model` | string | `zai/glm-5` | Model for background LLM tasks (dedup, extract, link). Use cheap models like `zai/glm-5` or `google-gemini-cli/gemini-3-flash-preview` to reduce costs |
+| `extraction_mode` | string | `balanced` | Adaptive extraction preset: `economy` (Lite plans, saves tokens), `balanced` (Pro plans, normal), `aggressive` (Team/Unlimited, no limits) |
 | `debug` | boolean | `false` | Enable debug logging |
 
 ### Environment Variables (CLI / MCP mode)

@@ -9,6 +9,62 @@
 // Plugin config (from openclaw.plugin.json configSchema)
 // ---------------------------------------------------------------------------
 
+// Extraction mode presets
+export type ExtractionMode = "economy" | "balanced" | "aggressive";
+
+export interface ExtractionPreset {
+  hourly_budget: number;           // Max extractions per hour
+  score_threshold: number;         // Min score to extract (1-10)
+  min_content_length: number;      // Min chars to consider
+  dm_priority: number;             // DM channel bonus
+  group_priority: number;          // Group channel bonus
+  keyword_bonus: number;           // "remember", "note" bonus
+  long_content_bonus: number;      // >500 chars bonus
+  quiet_conversation_bonus: number; // <3 msgs/10min bonus
+}
+
+export const EXTRACTION_PRESETS: Record<ExtractionMode, ExtractionPreset> = {
+  // economy: For Lite plans, minimal token usage
+  economy: {
+    hourly_budget: 2,
+    score_threshold: 7,
+    min_content_length: 300,
+    dm_priority: 5,
+    group_priority: 1,
+    keyword_bonus: 5,
+    long_content_bonus: 2,
+    quiet_conversation_bonus: 2,
+  },
+  // balanced: For Pro plans, normal operation (default)
+  balanced: {
+    hourly_budget: 5,
+    score_threshold: 4,
+    min_content_length: 200,
+    dm_priority: 4,
+    group_priority: 1,
+    keyword_bonus: 5,
+    long_content_bonus: 2,
+    quiet_conversation_bonus: 2,
+  },
+  // aggressive: For Team/Unlimited, extract everything
+  aggressive: {
+    hourly_budget: Infinity,
+    score_threshold: 1,
+    min_content_length: 100,
+    dm_priority: 2,
+    group_priority: 2,
+    keyword_bonus: 5,
+    long_content_bonus: 1,
+    quiet_conversation_bonus: 1,
+  },
+};
+
+// Keywords that trigger extraction regardless of score
+export const EXTRACTION_KEYWORDS = [
+  "remember", "note", "important", "don't forget", "save this",
+  "keep in mind", "for the record", "just so you know"
+];
+
 export interface QmemoryConfig {
   surrealdb_url: string;
   surrealdb_user: string;
@@ -25,6 +81,9 @@ export interface QmemoryConfig {
   linker_interval_ms: number;
   reflect_interval_ms: number;
   min_salience_recall: number;
+  subagent_model: string;
+  // Extraction mode (simple preset)
+  extraction_mode: ExtractionMode;
   debug: boolean;
 }
 
@@ -43,6 +102,9 @@ export const DEFAULT_CONFIG: QmemoryConfig = {
   linker_interval_ms: 1_800_000,  // 30 minutes
   reflect_interval_ms: 1_800_000, // 30 minutes
   min_salience_recall: 0.3,
+  subagent_model: "zai/glm-5",
+  // Extraction mode (preset: economy/balanced/aggressive)
+  extraction_mode: "balanced" as ExtractionMode,
   debug: false,
 };
 
