@@ -113,6 +113,50 @@ export function findRelatedMemories(memoryId: string): PreparedQuery {
   };
 }
 
+/**
+ * Batch-fetch connection hints for multiple memory IDs.
+ * Returns each memory's outgoing and incoming relates edges with target info.
+ * Used by search to enrich top results with "Connection Hints".
+ *
+ * NOTE: SurrealDB doesn't support parameterized record ID lists in SELECT FROM,
+ * so we build the ID list as a string. The IDs come from our own DB (not user input).
+ */
+export function getConnectionHints(memoryIds: string[]): PreparedQuery {
+  // Build comma-separated list: memory:`id1`, memory:`id2`, ...
+  const idList = memoryIds.map((id) => {
+    const bare = id.startsWith("memory:") ? id.slice(7) : id;
+    return `memory:\`${bare}\``;
+  }).join(", ");
+
+  return {
+    surql: `
+      SELECT
+        id,
+        ->relates.{type, reason, out, confidence} AS outgoing,
+        <-relates.{type, reason, in, confidence} AS incoming
+      FROM ${idList}
+    `,
+    params: {},
+  };
+}
+
+/**
+ * Resolve node IDs to their display names.
+ * Works for both entities (name field) and memories (content snippet).
+ */
+export function resolveNodeNames(nodeIds: string[]): PreparedQuery {
+  const idList = nodeIds.map((id) => {
+    const [table, bare] = id.includes(":") ? id.split(":", 2) : ["memory", id];
+    return `${table}:\`${bare}\``;
+  }).join(", ");
+
+  return {
+    surql: `SELECT id, name, type FROM entity WHERE id IN [${idList}];
+            SELECT id, string::slice(content, 0, 80) AS snippet, category FROM memory WHERE id IN [${idList}];`,
+    params: {},
+  };
+}
+
 /** Get or create a session by session_key using UPSERT (leverages unique index) */
 export function findOrCreateSession(
   sessionKey: string,
@@ -176,7 +220,7 @@ export function getGraphEntities(): PreparedQuery {
         count(->relates) + count(<-relates) AS total_links
       FROM entity
       ORDER BY total_links DESC
-      LIMIT 30
+      LIMIT 50
     `,
     params: {},
   };

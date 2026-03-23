@@ -13,7 +13,7 @@ import { Type } from "@sinclair/typebox";
 import { query } from "../db/client.js";
 import { createEngine } from "./engine.js";
 import { createLinkerService } from "./linker.js";
-import { searchMemories } from "../core/search.js";
+import { searchMemories, enrichWithConnections } from "../core/search.js";
 import { saveMemory } from "../core/save.js";
 import { correctMemory } from "../core/correct.js";
 import { linkNodes } from "../core/link.js";
@@ -337,7 +337,9 @@ export default function register(api: any): void {
         "WHEN TO USE: You need context from another session, someone asks 'what did we decide?', " +
         "you want to recall self-knowledge (categories: ['self']), or find who said what.\n\n" +
         "WHEN NOT TO USE: For things already in the current conversation.\n\n" +
-        "RETURNS: Memories (with source_person, evidence_type, confidence) + optionally tool calls + messages.\n\n" +
+        "RETURNS: Memories with CONNECTION HINTS (top 5 results show graph edges — linked books, people, other memories). " +
+        "When you see connections, FOLLOW THEM to explore the knowledge graph deeper. " +
+        "Each hint shows: type, target_name, target_type, reason.\n\n" +
         "EXAMPLES:\n" +
         '- Find memories: qmemory_search({query: "budget MAZJ"})\n' +
         '- Read other sessions: qmemory_search({query: "أسامة", include_messages: true})\n' +
@@ -386,8 +388,9 @@ export default function register(api: any): void {
         _toolCallId: string,
         params: Record<string, unknown>,
       ) => {
-        // Search memories
-        const memories = await searchMemories(params as RecallOptions);
+        // Search memories + enrich top 5 with graph connection hints
+        const rawMemories = await searchMemories(params as RecallOptions);
+        const memories = await enrichWithConnections(rawMemories, 5, 3);
 
         // Optionally search tool_call table
         let toolCalls: unknown[] = [];
@@ -431,6 +434,17 @@ export default function register(api: any): void {
         const response: Record<string, unknown> = { memories };
         if (toolCalls.length > 0) response.tool_calls = toolCalls;
         if (crossSessionMessages.length > 0) response.messages = crossSessionMessages;
+
+        // Count how many results have connections — nudge agent to explore
+        const connectedCount = memories.filter(
+          (m) => "connections" in m && m.connections?.total
+        ).length;
+        if (connectedCount > 0) {
+          response["💡 explore"] =
+            `${connectedCount} result(s) have graph connections. ` +
+            `Follow them with qmemory_search({query: "target name"}) to explore deeper, ` +
+            `or qmemory_link() to create new connections.`;
+        }
 
         return {
           content: [
@@ -518,9 +532,39 @@ export default function register(api: any): void {
           subagentRunner,
           embeddingConfig,
         );
+
+        // Post-save: find nearby memories to nudge agent toward linking
+        const response: Record<string, unknown> = { ...result };
+        if (result.action === "ADD" && result.memory_id) {
+          try {
+            // Quick BM25 search for nearby content (reuse first 50 chars as query)
+            const snippet = (params.content as string).slice(0, 80);
+            const nearby = await searchMemories({
+              query: snippet,
+              limit: 3,
+              min_salience: 0.0,
+            });
+            // Filter out the just-saved memory itself
+            const savedId = String(result.memory_id);
+            const others = nearby.filter((m) => String(m.id) !== savedId).slice(0, 2);
+            if (others.length > 0) {
+              response.nearby = others.map((m) => ({
+                id: String(m.id),
+                content: String(m.content).slice(0, 100),
+                category: m.category,
+              }));
+              response["💡 connect"] =
+                `Found ${others.length} related memory(s). Consider: ` +
+                `qmemory_link({from_id: "${savedId}", to_id: "${String(others[0].id)}", type: "relates_to"})`;
+            }
+          } catch {
+            // Non-fatal — don't block save on nearby search failure
+          }
+        }
+
         return {
           content: [
-            { type: "text", text: JSON.stringify(result, null, 2) },
+            { type: "text", text: JSON.stringify(response, null, 2) },
           ],
         };
       },

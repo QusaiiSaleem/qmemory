@@ -592,6 +592,7 @@ export interface GraphEntity {
   external_id?: string;
   outgoing: number;
   incoming: number;
+  total_links?: number;
 }
 
 export interface GraphEdge {
@@ -645,6 +646,23 @@ export function formatGraphMap(
     concept: "Concepts",
     contact: "Contacts",
   };
+
+  // Books get a special compact section — show count + top 5 by connections
+  const books = byType["book"];
+  if (books && books.length > 0) {
+    const sorted = [...books].sort((a, b) => (b.total_links ?? 0) - (a.total_links ?? 0));
+    const topBooks = sorted.slice(0, 5);
+    sections.push("", `**📚 Library (${books.length} books)**`);
+    for (const b of topBooks) {
+      const links = b.total_links ?? 0;
+      const name = b.name.length > 60 ? b.name.slice(0, 57) + "..." : b.name;
+      sections.push(`- ${name} (${links} connections)`);
+    }
+    if (books.length > 5) {
+      sections.push(`- _...and ${books.length - 5} more_`);
+    }
+    sections.push(`_Search book content: qmemory_search({categories: ["domain"], query: "book title or topic"})_`);
+  }
 
   for (const [type, label] of Object.entries(typeLabels)) {
     const items = byType[type];

@@ -1,0 +1,12 @@
+# Dependencies for ingest_books.py
+# Install: pip install -r scripts/requirements-books.txt
+
+PyMuPDF>=1.24.0         # PDF text extraction + page rendering (import fitz)
+google-genai>=1.0.0     # Gemini API for OCR + structure extraction
+voyageai>=0.3.0         # Voyage AI embeddings (voyage-3, 1024-dim)
+ebooklib>=0.18          # EPUB file parsing
+beautifulsoup4>=4.12    # HTML text extraction from EPUB chapters
+lxml>=5.0               # Fast HTML parser for BeautifulSoup
+pyyaml>=6.0             # YAML frontmatter parsing
+surrealdb>=1.0.0        # SurrealDB Python SDK (async)
+Pillow>=10.0            # Image processing (for Gemini OCR page images)

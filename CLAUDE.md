@@ -263,6 +263,42 @@ The first 72 hours of a session context activates **Discovery Mode** — an aggr
 
 Purpose: build a rich model of the user and the agent's own communication patterns early, while interactions are fresh and varied.
 
+## Agent Experience Design Principles
+
+### "Visible Connections Drive Agent Behavior"
+
+The agent's behavior is shaped by what it CAN SEE, not what EXISTS in the graph. If `relates` edges exist but are invisible in search results, they don't exist to the agent. This is the Wikipedia principle — hyperlinks make people explore. Remove them, people stop at one page.
+
+```
+WRONG (flat search):
+  qmemory_search("topic") → [memory, memory, memory]
+  Agent reads. Stops. ❌
+
+RIGHT (mind map search):
+  qmemory_search("topic") → [memory + 3 connections, memory + 1 note]
+  Agent sees: "This connects to Book X and Person Y"
+  Agent follows link → discovers more → KEEPS JUMPING 🧠
+```
+
+### Three Rules
+
+1. **Connection Hints, Not Full Traversal** — For top 5 search results, show connection counts + 2-3 best hints (type, target name, reason). Enough to trigger curiosity, not enough to overwhelm context.
+
+2. **Nudge with Tool Suggestions** — Every result with connections should suggest a next action: `"💡 Explore: qmemory_search({query: 'target_name'})"`. The agent needs a clear path to follow.
+
+3. **The Mind Map Metaphor** — The agent should always feel like it's navigating a connected knowledge graph, not querying a flat database. Every search result is a node with visible edges.
+
+### Implementation: Three Changes
+
+**Change 1 — `qmemory_search` Connection Hints:**
+For top 5 results, batch-query `relates` edges and attach `connections: {total, hints: [{type, target_name, target_type}]}` + `💡 explore` nudge. One SurrealQL batch query, no N+1.
+
+**Change 2 — `qmemory_save` Post-Save Nearby Nodes:**
+After saving, show 2-3 nearby nodes (from dedup candidates) with `💡 connect: qmemory_link(...)` suggestion.
+
+**Change 3 — Graph Map Books Section:**
+In context injection, group book entities separately with connection counts: `"📚 Library (48 books): top books by connections"`. Keeps graph map clean while making the library visible.
+
 ## Gotchas
 
 - **Jiti caches compiled plugins** — if gateway doesn't pick up code changes after rebuild, clear `/var/folders/*/T/jiti` and restart
