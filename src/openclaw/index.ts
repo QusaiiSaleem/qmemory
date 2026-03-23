@@ -238,34 +238,23 @@ export default function register(api: any): void {
     error: (msg: string) => console.error(`[qmemory] ${msg}`),
   };
 
-  // 3. Hook into subagent spawning to force cheap model for Qmemory's background tasks
-  //    (api.runtime.subagent.run() silently ignores the `model` param — this hook is the real fix)
-  try {
-    api.on("subagent_spawning", (event: any) => {
-      if (event.sessionKey?.startsWith("qmemory:subagent:")) {
-        event.modelOverride = config.subagent_model;
-        logger.debug(`Subagent model override → ${config.subagent_model}`);
-      }
-    });
-    logger.info("Hook registered: subagent_spawning");
-  } catch (hookErr) {
-    logger.error(`Failed to register subagent_spawning hook: ${hookErr}`);
-  }
-
-  // 4. Create the subagent runner (for LLM operations: dedup, extract, link)
+  // 3. Create the subagent runner (for LLM operations: dedup, extract, link)
+  //    Note: subagents inherit the parent session's model. OpenClaw's plugin SDK has no way
+  //    to override the model — neither SubagentRunParams nor subagent_spawning hook support it.
+  //    This is acceptable now that the primary model is Gemini (free via API key).
   const subagentRunner = createSubagentRunner(api, config.subagent_model);
 
-  // 5. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
+  // 4. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
   const openclawConfig = api.config as Record<string, unknown> | undefined;
 
-  // 5b. Resolve embedding config (used by save tool for vector generation)
+  // 4b. Resolve embedding config (used by save tool for vector generation)
   setEmbeddingLogger(logger);
   const embeddingConfig = resolveEmbeddingConfig(config, openclawConfig);
 
-  // 6. SurrealDB connection is handled by bootstrap() in engine.ts
+  // 5. SurrealDB connection is handled by bootstrap() in engine.ts
   //    (removed pre-flight IIFE that caused a duplicate connection race condition)
 
-  // 7. Check tools.alsoAllow config — warn if plugin tools will be hidden
+  // 6. Check tools.alsoAllow config — warn if plugin tools will be hidden
   const toolsConfig = (openclawConfig as any)?.tools;
   const alsoAllow: string[] = toolsConfig?.alsoAllow ?? [];
   const hasPluginGroup = alsoAllow.some(

@@ -270,6 +270,7 @@ Purpose: build a rich model of the user and the agent's own communication patter
 - **SurrealDB 3.0: `type::record()` not `type::thing()`** — `type::thing()` was removed in v3. Use `type::record("table", $id)` for parameterized record IDs
 - **SurrealDB 3.0: `search::score()` returns 0** — BM25 matching via `@@` works but scoring is broken. Vector search (cosine) handles relevance ranking
 - **Subagent API (OpenClaw)** — `api.runtime.subagent.run()` requires `{ sessionKey, message, idempotencyKey }`, returns `{ runId }`. Must then `waitForRun()` + `getSessionMessages()` + `deleteSession()`. The wrapper in `createSubagentRunner()` handles this
+- **⚠️ Subagent model override is NOT POSSIBLE via plugin SDK** — Neither `SubagentRunParams` (no `model` field) nor the `subagent_spawning` hook (event has `childSessionKey` but no `modelOverride` field) support overriding the model. Subagents always inherit the parent session's primary model. `agents.defaults.subagents.model` only applies to the built-in `sessions_spawn` tool, NOT plugin-spawned subagents. **Current status:** Not a cost issue since primary model switched to Gemini (free). Would need OpenClaw to add `model` to `SubagentRunParams` for true fix. Related OpenClaw issues: #10963, #10883, #6671, #7554, #7330
 - **`tools.alsoAllow: ["group:plugins"]` MUST be in openclaw.json** — the `coding` profile filters out ALL plugin tools via `applyToolPolicyPipeline`. Without this, tools register silently but the agent never sees them
 - **AgentTool interface requires `label` field** on every tool (e.g., `label: "Qmemory Search"`)
 - **`openclaw plugins inspect` does not exist** — use `openclaw plugins list` instead
@@ -283,6 +284,25 @@ Purpose: build a rich model of the user and the agent's own communication patter
 - OpenClaw logs: `/tmp/openclaw/openclaw-$(date +%Y-%m-%d).log` (JSON format, grep `"1":"message"`)
 - OpenClaw source: `/opt/homebrew/lib/node_modules/openclaw/dist/` for debugging internals
 
+## Subagent Model Override — NOT POSSIBLE (as of 2026-03-23)
+
+**Problem:** Qmemory's background tasks (dedup, extract, link) run via `api.runtime.subagent.run()`. Subagents always inherit the parent session's primary model. There is no way to override this via the plugin SDK.
+
+**What was tried and failed:**
+1. **`model` param in `SubagentRunParams`** — field doesn't exist, silently ignored by JS
+2. **`subagent_spawning` hook** — event uses `childSessionKey` (not `sessionKey`) and has no `modelOverride` field. Setting arbitrary properties has no effect.
+3. **`agents.defaults.subagents.model` config** — only applies to the built-in `sessions_spawn` tool, not plugin-spawned subagents
+
+**Current status: Not a cost issue.** Primary model is now Gemini (free via API key), so subagents also run on Gemini for free. The only remaining benefit of GLM-5 would be speed (smaller model = faster responses).
+
+**True fix:** Would require OpenClaw to add `model` to `SubagentRunParams`. Related issues: #10963, #10883, #6671, #7554, #7330
+
+**API gotchas learned along the way:**
+- OpenClaw hooks use `api.on("hook_name", handler)`, NOT `api.hooks.register()` (which crashes)
+- `subagent_spawning` event type: `{ childSessionKey, agentId, label?, mode, requester?, threadRequested }`
+
+**Note:** The `model` param in `createSubagentRunner()` can stay for forward-compatibility (OpenClaw may add it to `SubagentRunParams` later), but the hook is the reliable mechanism today.
+
 ## Config
 
 Plugin config in `openclaw.plugin.json`. Key settings:
@@ -292,7 +312,7 @@ Plugin config in `openclaw.plugin.json`. Key settings:
 - `embedding_provider: "auto"` — reads from OpenClaw's existing config
 - `linker_interval_ms: 1800000` — linker idle interval (30 min). When active: 5 min
 - `reflect_interval_ms: 1800000` — reflect idle interval (30 min). When active: 10 min. Staggered 15 min after linker
-- `subagent_model: "zai/glm-5"` — model for background LLM tasks (dedup, extract, link). Use cheap models to save costs. Alternatives: `google-gemini-cli/gemini-3-flash-preview`, `anthropic/claude-sonnet-4-6`
+- `subagent_model: "zai/glm-5"` — intended model for background LLM tasks (dedup, extract, link). **⚠️ NOT ACTUALLY USED** — OpenClaw's plugin SDK has no way to override the subagent model. Subagents inherit the parent session's primary model. Config kept for forward-compatibility if OpenClaw adds `model` to `SubagentRunParams`
 - `extraction_mode: "balanced"` — adaptive extraction preset:
   - `economy` — for Lite plans (80 prompts/5hr), minimal token usage, ~1-2 extractions/hour
   - `balanced` — for Pro plans (400 prompts/5hr), normal operation, ~3-5 extractions/hour (default)
