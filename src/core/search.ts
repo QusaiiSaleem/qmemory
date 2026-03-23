@@ -72,7 +72,7 @@ export async function searchMemories(
       try {
         const queryEmbedding = await generateEmbedding(searchQuery, embeddingConfig);
         if (queryEmbedding) {
-          const vecQ = searchMemoriesVector(queryEmbedding, limit);
+          const vecQ = searchMemoriesVector(queryEmbedding, limit, scope);
           const vecRows = await query<RecalledMemory>(vecQ.surql, vecQ.params);
           if (vecRows && vecRows.length > 0) {
             // Merge: add vector results not already in BM25 results

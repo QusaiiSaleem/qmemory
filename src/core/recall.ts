@@ -72,7 +72,7 @@ export async function recall(
   // Find memories connected via relates edges to other memories found by query
   // (Skip if no query — graph traversal needs a starting point)
   if (options.query && options.query.length > 10) {
-    const graphMemories = await fetchGraphLinked(options.query);
+    const graphMemories = await fetchGraphLinked(options.query, options.scope);
     collected.push(...graphMemories);
     logger.debug(`Recall tier 1 (graph): ${graphMemories.length} memories`);
   } else {
@@ -98,7 +98,7 @@ export async function recall(
 
   // --- Tier 4: Recent fallback (skip if already have enough) ---
   if (collected.length < targetCount) {
-    const recentResults = await fetchRecent();
+    const recentResults = await fetchRecent(options.scope);
     collected.push(...recentResults);
     logger.debug(`Recall tier 4 (recent): ${recentResults.length} memories`);
   }
@@ -131,7 +131,7 @@ export async function recall(
  * Strategy: find entities whose name matches words in the query,
  * then traverse their relates edges to find connected memories.
  */
-async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
+async function fetchGraphLinked(queryText: string, scope?: string): Promise<RecalledMemory[]> {
   // Extract likely entity names (capitalized words, 3+ chars)
   const words = queryText
     .split(/\s+/)
@@ -141,6 +141,11 @@ async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
     .slice(0, 10); // Cap to avoid huge queries
 
   if (words.length === 0) return [];
+
+  // Scope-aware: only return memories from current scope + global (no cross-topic leaks)
+  const scopeFilter = scope && scope !== "any"
+    ? `AND (scope = $scope OR scope = "global")`
+    : "";
 
   // Find memories connected to entities whose names match query words
   const surql = `
@@ -152,6 +157,7 @@ async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
     SELECT * FROM memory
     WHERE is_active = true
       AND (valid_until IS NONE OR valid_until > time::now())
+      ${scopeFilter}
       AND id IN (
         SELECT VALUE <-relates<-.id FROM $entities
         WHERE <-relates<-.id IS NOT NONE
@@ -162,14 +168,15 @@ async function fetchGraphLinked(queryText: string): Promise<RecalledMemory[]> {
 
   const params: Record<string, unknown> = {};
   words.forEach((w, i) => { params[`w${i}`] = w; });
+  if (scope && scope !== "any") params.scope = scope;
 
   const rows = await query<RecalledMemory>(surql, params);
   return rows ?? [];
 }
 
-/** Tier 4: Get the most recent active memories as a fallback */
-async function fetchRecent(): Promise<RecalledMemory[]> {
-  const prepared = getRecentMemories(RECENT_FALLBACK_LIMIT);
+/** Tier 4: Get the most recent active memories as a fallback (scope-aware) */
+async function fetchRecent(scope?: string): Promise<RecalledMemory[]> {
+  const prepared = getRecentMemories(RECENT_FALLBACK_LIMIT, scope ?? "any");
   const rows = await query<RecalledMemory>(prepared.surql, prepared.params);
   return rows ?? [];
 }

@@ -67,10 +67,11 @@ export function searchMemoriesBM25(
   };
 }
 
-/** Vector similarity search on memory embeddings */
+/** Vector similarity search on memory embeddings (scope-aware) */
 export function searchMemoriesVector(
   queryEmbedding: number[],
   limit: number,
+  scope: string = "any",
 ): PreparedQuery {
   return {
     surql: `
@@ -78,11 +79,12 @@ export function searchMemoriesVector(
       FROM memory
       WHERE is_active = true
         AND embedding IS NOT NONE
+        AND ($scope = "any" OR scope = $scope OR scope = "global")
         AND (valid_until IS NONE OR valid_until > time::now())
       ORDER BY vec_score DESC
       LIMIT $limit
     `,
-    params: { queryEmbedding, limit },
+    params: { queryEmbedding, limit, scope },
   };
 }
 
@@ -191,17 +193,18 @@ export function findEntityByName(name: string): PreparedQuery {
   };
 }
 
-/** Get the most recent active memories (fallback tier) */
-export function getRecentMemories(limit: number): PreparedQuery {
+/** Get the most recent active memories (fallback tier, scope-aware) */
+export function getRecentMemories(limit: number, scope: string = "any"): PreparedQuery {
   return {
     surql: `
       SELECT * FROM memory
       WHERE is_active = true
+        AND ($scope = "any" OR scope = $scope OR scope = "global")
         AND (valid_until IS NONE OR valid_until > time::now())
       ORDER BY created_at DESC
       LIMIT $limit;
     `,
-    params: { limit },
+    params: { limit, scope },
   };
 }
 
