@@ -240,12 +240,17 @@ export default function register(api: any): void {
 
   // 3. Hook into subagent spawning to force cheap model for Qmemory's background tasks
   //    (api.runtime.subagent.run() silently ignores the `model` param — this hook is the real fix)
-  api.hooks.register("subagent_spawning", (event: any) => {
-    if (event.sessionKey?.startsWith("qmemory:subagent:")) {
-      event.modelOverride = config.subagent_model;
-      logger.debug(`Subagent model override → ${config.subagent_model}`);
-    }
-  });
+  try {
+    api.on("subagent_spawning", (event: any) => {
+      if (event.sessionKey?.startsWith("qmemory:subagent:")) {
+        event.modelOverride = config.subagent_model;
+        logger.debug(`Subagent model override → ${config.subagent_model}`);
+      }
+    });
+    logger.info("Hook registered: subagent_spawning");
+  } catch (hookErr) {
+    logger.error(`Failed to register subagent_spawning hook: ${hookErr}`);
+  }
 
   // 4. Create the subagent runner (for LLM operations: dedup, extract, link)
   const subagentRunner = createSubagentRunner(api, config.subagent_model);
