@@ -57,7 +57,7 @@ export function searchMemoriesBM25(
       SELECT * FROM memory
       WHERE content @@ $query
         AND is_active = true
-        AND ($scope = "any" OR scope = $scope)
+        AND ($scope = "any" OR scope = $scope OR scope = "global")
         AND salience >= $minSalience
         AND (valid_until IS NONE OR valid_until > time::now())
       ORDER BY salience DESC
@@ -102,19 +102,6 @@ export function findUnlinkedMemories(limit: number): PreparedQuery {
   };
 }
 
-/** Find memories connected to a given memory via 'relates' edges (both directions) */
-export function findRelatedMemories(memoryId: string): PreparedQuery {
-  return {
-    surql: `
-      SELECT
-        <-relates<-memory AS inbound,
-        ->relates->memory AS outbound
-      FROM type::record($memoryId);
-    `,
-    params: { memoryId },
-  };
-}
-
 /**
  * Batch-fetch connection hints for multiple memory IDs.
  * Returns each memory's outgoing and incoming relates edges with target info.
@@ -138,23 +125,6 @@ export function getConnectionHints(memoryIds: string[]): PreparedQuery {
         <-relates.{type, reason, in, confidence} AS incoming
       FROM ${idList}
     `,
-    params: {},
-  };
-}
-
-/**
- * Resolve node IDs to their display names.
- * Works for both entities (name field) and memories (content snippet).
- */
-export function resolveNodeNames(nodeIds: string[]): PreparedQuery {
-  const idList = nodeIds.map((id) => {
-    const [table, bare] = id.includes(":") ? id.split(":", 2) : ["memory", id];
-    return `${table}:\`${bare}\``;
-  }).join(", ");
-
-  return {
-    surql: `SELECT id, name, type FROM entity WHERE id IN [${idList}];
-            SELECT id, string::slice(content, 0, 80) AS snippet, category FROM memory WHERE id IN [${idList}];`,
     params: {},
   };
 }
@@ -270,7 +240,7 @@ export function getMemoriesForScope(
     surql: `
       SELECT * FROM memory
       WHERE is_active = true
-        AND ($scope = "any" OR scope = $scope)
+        AND ($scope = "any" OR scope = $scope OR scope = "global")
         AND salience >= $minSalience
         AND (valid_from IS NONE OR valid_from <= type::datetime($validAt))
         AND (valid_until IS NONE OR valid_until > type::datetime($validAt))

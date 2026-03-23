@@ -689,7 +689,7 @@ export function formatGraphMap(
 
   // Show any remaining types not in the predefined list
   for (const [type, items] of Object.entries(byType)) {
-    if (typeLabels[type] || items.length === 0) continue;
+    if (typeLabels[type] || type === "book" || items.length === 0) continue;
     sections.push("", `**${type}**`);
     for (const e of items.slice(0, 5)) {
       sections.push(`- ${e.name}`);

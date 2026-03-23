@@ -9,7 +9,7 @@
  * and also exposed directly via the qmemory_search tool.
  */
 
-import { query, queryMulti } from "../db/client.js";
+import { query } from "../db/client.js";
 import { searchMemoriesBM25, searchMemoriesVector, getMemoriesForScope, getConnectionHints } from "../db/queries.js";
 import { generateEmbedding } from "./embeddings.js";
 import type { EmbeddingConfig } from "./embeddings.js";
@@ -149,120 +149,98 @@ export async function enrichWithConnections(
 ): Promise<EnrichedMemory[]> {
   if (results.length === 0) return results;
 
-  // Only enrich top N results (graph queries have cost)
-  const toEnrich = results.slice(0, topN);
-  const memoryIds = toEnrich.map((r) => String(r.id));
+  const memoryIds = results.slice(0, topN).map((r) => String(r.id));
 
   try {
+    // 1. Batch-fetch edges for all top results (single query)
     const hintsQuery = getConnectionHints(memoryIds);
     const rows = await query<{
       id: unknown;
-      outgoing: Array<{ type: string; reason?: string; out: unknown; confidence?: number }>;
-      incoming: Array<{ type: string; reason?: string; in: unknown; confidence?: number }>;
+      outgoing: Array<{ type: string; reason?: string; out: unknown }>;
+      incoming: Array<{ type: string; reason?: string; in: unknown }>;
     }>(hintsQuery.surql, hintsQuery.params);
 
     if (!rows || rows.length === 0) return results;
 
-    // Build a map of memory ID → raw edges
-    const edgeMap = new Map<string, { outgoing: unknown[]; incoming: unknown[] }>();
-    for (const row of rows) {
-      edgeMap.set(String(row.id), {
-        outgoing: row.outgoing ?? [],
-        incoming: row.incoming ?? [],
-      });
-    }
-
-    // Collect all target IDs we need to resolve names for
+    // 2. Collect all target node IDs from edges
+    type RawEdge = { type: string; reason?: string; out?: unknown; in?: unknown };
+    const edgeMap = new Map<string, RawEdge[]>();
     const targetIds = new Set<string>();
-    for (const [, edges] of edgeMap) {
-      for (const e of edges.outgoing as Array<{ out: unknown }>) {
-        if (e.out) targetIds.add(String(e.out));
+
+    for (const row of rows) {
+      const mid = String(row.id);
+      const edges: RawEdge[] = [];
+      for (const e of row.outgoing ?? []) {
+        if (e.out) { targetIds.add(String(e.out)); edges.push(e); }
       }
-      for (const e of edges.incoming as Array<{ in: unknown }>) {
-        if (e.in) targetIds.add(String(e.in));
+      for (const e of row.incoming ?? []) {
+        if (e.in) { targetIds.add(String(e.in)); edges.push(e); }
       }
+      if (edges.length > 0) edgeMap.set(mid, edges);
     }
 
-    // Resolve target names (batch query for entities + memories)
+    if (edgeMap.size === 0) return results;
+
+    // 3. Batch-resolve names (2 queries instead of N — entities + memories)
     const nameMap = new Map<string, { name: string; type: string }>();
-    if (targetIds.size > 0) {
+    const allIds = [...targetIds].slice(0, 50); // Cap to prevent pathological cases
+    if (allIds.length > 0) {
       try {
-        // Query entities and memories separately
-        for (const tid of targetIds) {
-          const table = tid.includes(":") ? tid.split(":")[0] : "memory";
-          if (table === "entity") {
-            const entRows = await query<{ id: unknown; name: string; type: string }>(
-              `SELECT id, name, type FROM ${tid}`,
-              {},
-            );
-            if (entRows?.[0]) {
-              nameMap.set(tid, { name: entRows[0].name, type: entRows[0].type });
-            }
-          } else if (table === "memory") {
-            const memRows = await query<{ id: unknown; content: string; category: string }>(
-              `SELECT id, string::slice(content, 0, 80) AS content, category FROM ${tid}`,
-              {},
-            );
-            if (memRows?.[0]) {
-              nameMap.set(tid, { name: memRows[0].content, type: "memory" });
-            }
-          }
+        const entIds = allIds.filter((id) => id.startsWith("entity:"));
+        const memIds = allIds.filter((id) => !id.startsWith("entity:"));
+
+        const [entRows, memRows] = await Promise.all([
+          entIds.length > 0
+            ? query<{ id: unknown; name: string; type: string }>(
+                "SELECT id, name, type FROM entity WHERE id IN $ids",
+                { ids: entIds },
+              )
+            : Promise.resolve([]),
+          memIds.length > 0
+            ? query<{ id: unknown; content: string; category: string }>(
+                "SELECT id, string::slice(content, 0, 80) AS content, category FROM memory WHERE id IN $ids",
+                { ids: memIds },
+              )
+            : Promise.resolve([]),
+        ]);
+
+        for (const e of entRows ?? []) {
+          nameMap.set(String(e.id), { name: e.name, type: e.type });
+        }
+        for (const m of memRows ?? []) {
+          nameMap.set(String(m.id), { name: m.content, type: "memory" });
         }
       } catch {
         logger.debug("Search: name resolution failed (non-fatal)");
       }
     }
 
-    // Build enriched results
-    const enriched: EnrichedMemory[] = results.map((r, i) => {
-      if (i >= topN) return r; // Leave non-top results as-is
+    // 4. Build enriched results
+    return results.map((r, i) => {
+      if (i >= topN) return r;
 
-      const mid = String(r.id);
-      const edges = edgeMap.get(mid);
+      const edges = edgeMap.get(String(r.id));
       if (!edges) return r;
 
-      const allEdges: ConnectionHint[] = [];
-
-      // Process outgoing edges
-      for (const e of edges.outgoing as Array<{ type: string; reason?: string; out: unknown }>) {
-        const targetId = String(e.out);
-        const resolved = nameMap.get(targetId);
-        allEdges.push({
+      const hints: ConnectionHint[] = edges.slice(0, maxHints).map((e) => {
+        const tid = String(e.out ?? e.in);
+        const resolved = nameMap.get(tid);
+        return {
           type: e.type || "related",
-          target_id: targetId,
-          target_name: resolved?.name || targetId,
+          target_id: tid,
+          target_name: resolved?.name || tid,
           target_type: resolved?.type || "unknown",
           reason: e.reason,
-        });
-      }
-
-      // Process incoming edges
-      for (const e of edges.incoming as Array<{ type: string; reason?: string; in: unknown }>) {
-        const sourceId = String(e.in);
-        const resolved = nameMap.get(sourceId);
-        allEdges.push({
-          type: e.type || "related",
-          target_id: sourceId,
-          target_name: resolved?.name || sourceId,
-          target_type: resolved?.type || "unknown",
-          reason: e.reason,
-        });
-      }
-
-      if (allEdges.length === 0) return r;
+        };
+      });
 
       return {
         ...r,
-        connections: {
-          total: allEdges.length,
-          hints: allEdges.slice(0, maxHints),
-        },
+        connections: { total: edges.length, hints },
       };
     });
-
-    return enriched;
   } catch (e) {
     logger.debug(`Search: connection enrichment failed (non-fatal): ${e}`);
-    return results; // Graceful degradation — return flat results
+    return results;
   }
 }
