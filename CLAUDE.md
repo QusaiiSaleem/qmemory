@@ -90,8 +90,8 @@ No agent action needed. The tree builds itself.
 ## Context injection
 
 Two injection mechanisms:
-- **`appendSystemContext`** (static, cached) — `AGENT_SYSTEM_CONTEXT` in `index.ts`, teaches the agent its tools, memory philosophy, and how to read injected context. No per-turn cost.
-- **`systemPromptAddition`** (dynamic, per-turn) — built by `assemble()`, contains self-model, memories with evidence markers, tool ledger, scratchpad, graph map. See "What the agent sees" section above for injection order.
+- **`appendSystemContext`** (static, cached) — `AGENT_SYSTEM_CONTEXT` in `tools/system-context.ts`, teaches the agent its tools, memory philosophy, and how to read injected context. No per-turn cost.
+- **`systemPromptAddition`** (dynamic, per-turn) — built by `engine/assemble.ts`, contains self-model, memories with evidence markers, tool ledger, scratchpad, graph map. See "What the agent sees" section above for injection order.
 
 ## Design principles
 
@@ -148,16 +148,24 @@ surreal sql -e http://localhost:8000 -u root -p root --namespace qmemory --datab
 
 ```
 src/
-├── core/           ← SHARED logic (recall, save, search, correct, link, extract, dedup, embeddings, migrate)
-├── db/             ← SurrealDB connection + parameterized queries
-├── openclaw/       ← ENTRY 1: Context engine plugin + 6 tools + linker service
-├── mcp/            ← ENTRY 2: FastMCP server (4 tools for Claude Code/Claude.ai)
-├── cli.ts          ← ENTRY 3: CLI (npx qmemory serve|serve-http|status|schema)
-├── config.ts       ← All types, constants, formatMemories()
-└── ui/             ← Graph viewer (vis.js, served at /qmemory/graph)
+├── types.ts              ← All interfaces and type definitions
+├── constants.ts          ← Categories, presets, thresholds
+├── config.ts             ← Barrel re-export (backwards compat for imports)
+├── formatters/           ← memories.ts, graph-map.ts, budget.ts
+├── core/                 ← SHARED logic (12 files: recall, save, search, dedup, extract, etc.)
+├── db/                   ← SurrealDB connection + parameterized queries
+├── openclaw/
+│   ├── index.ts          ← Slim register() entry point
+│   ├── tools/            ← 6 tool files: search, save, correct, link, person, system-context
+│   ├── engine/           ← bootstrap, assemble, compact, session (context engine)
+│   ├── hooks/            ← tool-call, lifecycle, subagent, message (12 hooks)
+│   └── services/         ← linker, reflect, salience (background jobs)
+├── mcp/                  ← FastMCP server (4 tools for Claude Code/Claude.ai)
+├── cli.ts                ← CLI (npx qmemory serve|serve-http|status|schema)
+└── ui/                   ← Graph viewer (vis.js, served at /qmemory/graph)
 ```
 
-**Three entry points, one core.** OpenClaw plugin, MCP server, and CLI all call the same `core/` functions.
+**Three entry points, one core.** OpenClaw plugin, MCP server, and CLI all call the same `core/` functions. Max file size: ~500 lines.
 
 ## Graph Schema (SurrealDB)
 
@@ -176,7 +184,7 @@ Schema file: `schema/qmemory.surql`
 - **LLM via subagents** — `api.runtime.subagent.run()` inside OpenClaw, no extra API keys
 - **Embeddings via OpenClaw config** — `resolveEmbeddingConfig()` reads existing Voyage/OpenAI key from `api.config`
 - **Token budget** — memory injection capped at 15% of context window, sorted by salience DESC
-- **Session key parsing** — `parseSessionKey()` in `engine.ts` extracts topic/group/channel automatically
+- **Session key parsing** — `parseSessionKey()` in `engine/session.ts` extracts topic/group/channel automatically
 
 ## OpenClaw Plugin Tools (6 tools)
 
@@ -230,7 +238,7 @@ All background tasks use **self-scheduling**: after each run, the task checks if
 
 ## Memory Categories
 
-8 categories (must match `MEMORY_CATEGORIES` in `config.ts`):
+8 categories (defined in `constants.ts`, re-exported from `config.ts`):
 
 | Category | Purpose |
 |----------|---------|
@@ -288,16 +296,11 @@ RIGHT (mind map search):
 
 3. **The Mind Map Metaphor** — The agent should always feel like it's navigating a connected knowledge graph, not querying a flat database. Every search result is a node with visible edges.
 
-### Implementation: Three Changes
+### Current Implementation (v0.4.0+)
 
-**Change 1 — `qmemory_search` Connection Hints:**
-For top 5 results, batch-query `relates` edges and attach `connections: {total, hints: [{type, target_name, target_type}]}` + `💡 explore` nudge. One SurrealQL batch query, no N+1.
-
-**Change 2 — `qmemory_save` Post-Save Nearby Nodes:**
-After saving, show 2-3 nearby nodes (from dedup candidates) with `💡 connect: qmemory_link(...)` suggestion.
-
-**Change 3 — Graph Map Books Section:**
-In context injection, group book entities separately with connection counts: `"📚 Library (48 books): top books by connections"`. Keeps graph map clean while making the library visible.
+- **`qmemory_search`** — Top 5 results enriched with `connections: {total, hints}` + `💡 explore` nudge. Batch query (2 queries, not N+1).
+- **`qmemory_save`** — Post-save shows 2-3 nearby memories + `💡 connect: qmemory_link(...)` suggestion.
+- **Graph Map** — Books shown in dedicated Library section with connection counts + search nudge.
 
 ## Gotchas
 
@@ -320,24 +323,11 @@ In context injection, group book entities separately with connection counts: `"�
 - OpenClaw logs: `/tmp/openclaw/openclaw-$(date +%Y-%m-%d).log` (JSON format, grep `"1":"message"`)
 - OpenClaw source: `/opt/homebrew/lib/node_modules/openclaw/dist/` for debugging internals
 
-## Subagent Model Override — NOT POSSIBLE (as of 2026-03-23)
+## Subagent Model Override — NOT POSSIBLE
 
-**Problem:** Qmemory's background tasks (dedup, extract, link) run via `api.runtime.subagent.run()`. Subagents always inherit the parent session's primary model. There is no way to override this via the plugin SDK.
+Plugin-spawned subagents always inherit the parent session's primary model. OpenClaw's `SubagentRunParams` has no `model` field, and the `subagent_spawning` hook has no `modelOverride`. Not a cost issue since primary model is Gemini (free). Related OpenClaw issues: #10963, #10883.
 
-**What was tried and failed:**
-1. **`model` param in `SubagentRunParams`** — field doesn't exist, silently ignored by JS
-2. **`subagent_spawning` hook** — event uses `childSessionKey` (not `sessionKey`) and has no `modelOverride` field. Setting arbitrary properties has no effect.
-3. **`agents.defaults.subagents.model` config** — only applies to the built-in `sessions_spawn` tool, not plugin-spawned subagents
-
-**Current status: Not a cost issue.** Primary model is now Gemini (free via API key), so subagents also run on Gemini for free. The only remaining benefit of GLM-5 would be speed (smaller model = faster responses).
-
-**True fix:** Would require OpenClaw to add `model` to `SubagentRunParams`. Related issues: #10963, #10883, #6671, #7554, #7330
-
-**API gotchas learned along the way:**
-- OpenClaw hooks use `api.on("hook_name", handler)`, NOT `api.hooks.register()` (which crashes)
-- `subagent_spawning` event type: `{ childSessionKey, agentId, label?, mode, requester?, threadRequested }`
-
-**Note:** The `model` param in `createSubagentRunner()` can stay for forward-compatibility (OpenClaw may add it to `SubagentRunParams` later), but the hook is the reliable mechanism today.
+Key API gotcha: hooks use `api.on("hook_name", handler)`, NOT `api.hooks.register()` (crashes).
 
 ## Config
 
