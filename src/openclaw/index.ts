@@ -238,20 +238,29 @@ export default function register(api: any): void {
     error: (msg: string) => console.error(`[qmemory] ${msg}`),
   };
 
-  // 3. Create the subagent runner (for LLM operations: dedup, extract, link)
+  // 3. Hook into subagent spawning to force cheap model for Qmemory's background tasks
+  //    (api.runtime.subagent.run() silently ignores the `model` param — this hook is the real fix)
+  api.hooks.register("subagent_spawning", (event: any) => {
+    if (event.sessionKey?.startsWith("qmemory:subagent:")) {
+      event.modelOverride = config.subagent_model;
+      logger.debug(`Subagent model override → ${config.subagent_model}`);
+    }
+  });
+
+  // 4. Create the subagent runner (for LLM operations: dedup, extract, link)
   const subagentRunner = createSubagentRunner(api, config.subagent_model);
 
-  // 4. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
+  // 5. Resolve embedding config from OpenClaw's EXISTING settings (no extra API key!)
   const openclawConfig = api.config as Record<string, unknown> | undefined;
 
-  // 4b. Resolve embedding config (used by save tool for vector generation)
+  // 5b. Resolve embedding config (used by save tool for vector generation)
   setEmbeddingLogger(logger);
   const embeddingConfig = resolveEmbeddingConfig(config, openclawConfig);
 
-  // 5. SurrealDB connection is handled by bootstrap() in engine.ts
+  // 6. SurrealDB connection is handled by bootstrap() in engine.ts
   //    (removed pre-flight IIFE that caused a duplicate connection race condition)
 
-  // 6. Check tools.alsoAllow config — warn if plugin tools will be hidden
+  // 7. Check tools.alsoAllow config — warn if plugin tools will be hidden
   const toolsConfig = (openclawConfig as any)?.tools;
   const alsoAllow: string[] = toolsConfig?.alsoAllow ?? [];
   const hasPluginGroup = alsoAllow.some(
