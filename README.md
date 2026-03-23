@@ -245,12 +245,21 @@ Qmemory's brain is a graph with **7 table types** and **5 edge types**:
 
 ### Graph Intelligence
 - **Dynamic relationships** — the agent creates ANY edge type between any two nodes (`supports`, `contradicts`, `blocks`, etc.)
+- **Connection hints in search** — top 5 search results show graph edges (type, target name, reason) so the agent sees and follows connections like a mind map
+- **Post-save nudges** — after saving a memory, shows 2-3 nearby memories with `qmemory_link()` suggestions to build connections
 - **Background linker** (every 5 min) — finds unlinked memories, asks the LLM to discover relationships, creates edges
 - **Salience decay** (every 5 min) — memories older than 7 days get salience *= 0.95 (floor 0.1), so old facts naturally fade unless recalled
 - **Background reflect** (every 30 min) — synthesizes insights across memories, resolves contradictions (inspired by Hindsight)
 - **Auto graph structure** — channel/topic/session hierarchy built automatically on bootstrap (no agent action needed)
 - **12 lifecycle hooks** — captures tool calls, cron outcomes, token usage, subagent relationships, sender identity, delivery routing, session lifecycle
 - **Entity extraction** — people, projects, orgs, concepts, and systems become first-class graph nodes
+
+### Book Library Ingestion
+- **PDF + EPUB processing** — standalone Python script ingests entire book libraries into the memory graph
+- **Smart OCR** — PyMuPDF native text first, Gemini Vision OCR fallback for scanned documents (Arabic-optimized)
+- **Arabic-aware chunking** — ~900 tokens per chunk, 15% overlap, sentence boundary detection (. ؟ ! \n\n)
+- **Graph integration** — books and authors become entity nodes, chunks become domain memories, all connected via `relates` edges
+- **📚 Library section in graph map** — books shown separately in context injection with connection counts and search nudges
 
 ### OpenClaw Deep Integration
 - **Pre-compaction memory flush** — at 70% context usage, Qmemory extracts memories *before* compaction fires (fixes [OpenClaw #19488](https://github.com/openclaw/openclaw/issues/19488))
@@ -542,11 +551,11 @@ Qmemory exposes **6 tools** in OpenClaw mode and **4 tools** in MCP mode.
 
 ### `qmemory_search`
 
-Search cross-session memory AND tool call history.
+Search cross-session memory AND tool call history. **Top 5 results are enriched with graph connection hints** — the agent sees linked books, people, and other memories, encouraging exploration through the knowledge graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | No | Search by meaning (BM25 full-text) |
+| `query` | string | No | Search by meaning (BM25 full-text + vector similarity) |
 | `categories` | string[] | No | Filter: `style`, `preference`, `context`, `decision`, `idea`, `feedback`, `domain` |
 | `scope` | string | No | Filter: `global`, `project:xxx`, `topic:xxx` |
 | `limit` | number | No | Max results, 1–50 (default: 10) |

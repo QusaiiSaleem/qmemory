@@ -354,6 +354,61 @@ Plugin config in `openclaw.plugin.json`. Key settings:
   - `balanced` — for Pro plans (400 prompts/5hr), normal operation, ~3-5 extractions/hour (default)
   - `aggressive` — for Team/Unlimited plans, extract everything, no limits
 
+## Book Ingestion Pipeline
+
+Standalone Python script that processes books (PDFs + EPUBs) into the Qmemory graph. Books are stored using existing tables — no schema changes.
+
+### How It Works
+
+```
+PDF/EPUB → Text Extraction → Gemini Structure → Chunk (~900 tokens) → Voyage Embed → SurrealDB
+```
+
+- **PDFs**: PyMuPDF native text first, Gemini OCR fallback for scanned
+- **EPUBs**: ebooklib + BeautifulSoup (no OCR needed)
+- **Chunks** → `memory` (category: domain, salience: 0.35, scope: global)
+- **Books** → `entity` (type: book) + `relates` edge (from_book)
+- **Authors** → `entity` (type: person) + `relates` edge (wrote)
+
+### Usage
+
+```bash
+# Setup
+cd ~/dev/Qmemory
+pip install -r scripts/requirements-books.txt
+
+# Set API keys (don't source full Awqaf .env — it overrides SURREAL_* vars)
+export GOOGLE_API_KEY=...
+export VOYAGE_API_KEY=...
+
+# Process all books
+.venv/bin/python3.13 scripts/ingest_books.py ~/Downloads/"Apple Books"
+
+# Test with 3 books first
+.venv/bin/python3.13 scripts/ingest_books.py ~/Downloads/"Apple Books" --limit 3
+
+# Dry run (no DB writes)
+.venv/bin/python3.13 scripts/ingest_books.py ~/Downloads/"Apple Books" --dry-run
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/ingest_books.py` | Main pipeline (extract → structure → chunk → embed → store) |
+| `scripts/requirements-books.txt` | Python dependencies (PyMuPDF, google-genai, voyageai, etc.) |
+| `scripts/book_ingest_spec.md` | Design specification |
+| `data/books/` | Intermediate files (_raw.txt, _structured.md) for resume support |
+
+### Gotchas
+
+- Uses `QMEMORY_*` env vars (not `SURREAL_*`) to avoid collision with Awqaf project
+- Gemini `http_options: {timeout: 300_000}` prevents infinite hangs on large texts
+- Large texts (>200K chars) truncated before Gemini structure extraction
+- Resumable: skips books with existing raw/structured files or DB entities
+- Python 3.13 required (voyageai doesn't support 3.14 yet)
+- `.venv/` at project root (Python 3.13 via `/opt/homebrew/bin/python3.13`)
+
 ## Publishing
 
 - **npm:** published as `qmemory` — auto-publishes via GitHub Actions on Release
