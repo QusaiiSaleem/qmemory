@@ -1003,6 +1003,25 @@ Entities in Qmemory can reference external systems. This means your agent can co
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Example: X/Twitter Source Memory With TweetClaw
+
+If your OpenClaw agent needs public X/Twitter source material before saving memories, install Qmemory beside [TweetClaw](https://github.com/Xquik-dev/tweetclaw):
+
+```bash
+openclaw plugins install @xquik/tweetclaw
+```
+
+TweetClaw is published as [@xquik/tweetclaw](https://www.npmjs.com/package/@xquik/tweetclaw) and gives agents tools for search tweets, search tweet replies, follower export, user lookup, media upload and download, direct messages, monitor tweets, webhooks, giveaway draws, and approval-reviewed post tweets or post tweet replies.
+
+A useful pattern is:
+
+1. Use TweetClaw to gather public source URLs, tweet IDs, author handles, and observed metrics.
+2. Ask the agent to review and summarize the evidence.
+3. Save only reviewed conclusions, source URLs, tweet IDs, capture dates, and next actions with `qmemory_save`.
+4. Link related memories with `qmemory_link` so future sessions can trace the decision back to its public source.
+
+Keep TweetClaw credentials in its OpenClaw plugin config. Qmemory should store durable conclusions and source references, not live API credentials or raw session material.
+
 ---
 
 ## 🐛 Community Issues Solved
