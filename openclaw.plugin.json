@@ -3,7 +3,7 @@
   "kind": "context-engine",
   "name": "Qmemory",
   "description": "Graph memory context engine powered by SurrealDB — cross-session intelligence with salience scoring, temporal validity, and dynamic relationship graphs",
-  "version": "0.3.2",
+  "version": "0.5.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
